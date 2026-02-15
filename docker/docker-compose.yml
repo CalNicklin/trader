@@ -4,6 +4,7 @@ services:
     restart: unless-stopped
     ports:
       - "4002:4002"
+      - "4004:4004"
       - "5900:5900"
     environment:
       TWS_USERID: ${IBKR_USERNAME}
@@ -26,7 +27,7 @@ services:
         condition: service_started
     environment:
       IBKR_HOST: ib-gateway
-      IBKR_PORT: 4002
+      IBKR_PORT: 4004
       IBKR_CLIENT_ID: 1
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       RESEND_API_KEY: ${RESEND_API_KEY}
