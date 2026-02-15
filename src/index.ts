@@ -5,6 +5,7 @@ import { getConfig } from "./config.ts";
 import { closeDb, getDb } from "./db/client.ts";
 import { seedDatabase } from "./db/seed.ts";
 import { startScheduler, stopScheduler } from "./scheduler/cron.ts";
+import { sendCriticalAlert } from "./utils/alert.ts";
 import { getLogger } from "./utils/logger.ts";
 
 const log = getLogger();
@@ -66,14 +67,17 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 // Unhandled errors
 process.on("uncaughtException", (error) => {
 	log.fatal({ error }, "Uncaught exception");
-	shutdown("uncaughtException");
+	sendCriticalAlert("Uncaught exception", String(error?.stack ?? error)).finally(() =>
+		shutdown("uncaughtException"),
+	);
 });
 
 process.on("unhandledRejection", (reason) => {
 	log.fatal({ reason }, "Unhandled rejection");
 });
 
-boot().catch((error) => {
+boot().catch(async (error) => {
 	log.fatal({ error }, "Boot failed");
+	await sendCriticalAlert("Boot failed", String(error?.stack ?? error));
 	process.exit(1);
 });
