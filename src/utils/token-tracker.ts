@@ -2,25 +2,28 @@ import { gte, sql } from "drizzle-orm";
 import { getDb } from "../db/client.ts";
 import { tokenUsage } from "../db/schema.ts";
 
-// Sonnet 4.5 pricing (per million tokens)
-const INPUT_COST_PER_M = 3.0;
-const OUTPUT_COST_PER_M = 15.0;
-const CACHE_WRITE_COST_PER_M = 3.75;
-const CACHE_READ_COST_PER_M = 0.3;
+// Pricing per million tokens by model tier
+const PRICING = {
+	sonnet: { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
+	haiku: { input: 1.0, output: 5.0, cacheWrite: 1.25, cacheRead: 0.1 },
+} as const;
 
-export interface TokenCounts {
-	inputTokens: number;
-	outputTokens: number;
-	cacheCreationTokens?: number;
-	cacheReadTokens?: number;
-}
+// Jobs that use the fast (Haiku) model
+const FAST_MODEL_JOBS = new Set(["research", "trade_reviewer"]);
 
-function estimateCost(tokens: TokenCounts): number {
+function estimateCost(
+	job: string,
+	inputTokens: number,
+	outputTokens: number,
+	cacheCreationTokens?: number,
+	cacheReadTokens?: number,
+): number {
+	const p = FAST_MODEL_JOBS.has(job) ? PRICING.haiku : PRICING.sonnet;
 	return (
-		(tokens.inputTokens * INPUT_COST_PER_M +
-			tokens.outputTokens * OUTPUT_COST_PER_M +
-			(tokens.cacheCreationTokens ?? 0) * CACHE_WRITE_COST_PER_M +
-			(tokens.cacheReadTokens ?? 0) * CACHE_READ_COST_PER_M) /
+		(inputTokens * p.input +
+			outputTokens * p.output +
+			(cacheCreationTokens ?? 0) * p.cacheWrite +
+			(cacheReadTokens ?? 0) * p.cacheRead) /
 		1_000_000
 	);
 }
@@ -37,12 +40,13 @@ export async function recordUsage(
 		job,
 		inputTokens,
 		outputTokens,
-		estimatedCostUsd: estimateCost({
+		estimatedCostUsd: estimateCost(
+			job,
 			inputTokens,
 			outputTokens,
 			cacheCreationTokens,
 			cacheReadTokens,
-		}),
+		),
 	});
 }
 

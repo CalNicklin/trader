@@ -59,7 +59,7 @@ Provide your analysis as JSON.`;
 
 	try {
 		const response = await client.messages.create({
-			model: config.CLAUDE_MODEL,
+			model: config.CLAUDE_MODEL_FAST,
 			max_tokens: 1024,
 			system: [{ type: "text", text: ANALYSIS_SYSTEM, cache_control: { type: "ephemeral" } }],
 			messages: [{ role: "user", content: prompt }],
