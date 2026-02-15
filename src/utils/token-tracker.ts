@@ -5,22 +5,44 @@ import { tokenUsage } from "../db/schema.ts";
 // Sonnet 4.5 pricing (per million tokens)
 const INPUT_COST_PER_M = 3.0;
 const OUTPUT_COST_PER_M = 15.0;
+const CACHE_WRITE_COST_PER_M = 3.75;
+const CACHE_READ_COST_PER_M = 0.3;
 
-function estimateCost(inputTokens: number, outputTokens: number): number {
-	return (inputTokens * INPUT_COST_PER_M + outputTokens * OUTPUT_COST_PER_M) / 1_000_000;
+export interface TokenCounts {
+	inputTokens: number;
+	outputTokens: number;
+	cacheCreationTokens?: number;
+	cacheReadTokens?: number;
+}
+
+function estimateCost(tokens: TokenCounts): number {
+	return (
+		(tokens.inputTokens * INPUT_COST_PER_M +
+			tokens.outputTokens * OUTPUT_COST_PER_M +
+			(tokens.cacheCreationTokens ?? 0) * CACHE_WRITE_COST_PER_M +
+			(tokens.cacheReadTokens ?? 0) * CACHE_READ_COST_PER_M) /
+		1_000_000
+	);
 }
 
 export async function recordUsage(
 	job: string,
 	inputTokens: number,
 	outputTokens: number,
+	cacheCreationTokens?: number,
+	cacheReadTokens?: number,
 ): Promise<void> {
 	const db = getDb();
 	await db.insert(tokenUsage).values({
 		job,
 		inputTokens,
 		outputTokens,
-		estimatedCostUsd: estimateCost(inputTokens, outputTokens),
+		estimatedCostUsd: estimateCost({
+			inputTokens,
+			outputTokens,
+			cacheCreationTokens,
+			cacheReadTokens,
+		}),
 	});
 }
 

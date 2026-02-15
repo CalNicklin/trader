@@ -112,7 +112,9 @@ ${ALLOWED_FILES.join("\n")}
 		const response = await client.messages.create({
 			model: config.CLAUDE_MODEL,
 			max_tokens: 4096,
-			system: SELF_IMPROVEMENT_SYSTEM,
+			system: [
+				{ type: "text", text: SELF_IMPROVEMENT_SYSTEM, cache_control: { type: "ephemeral" } },
+			],
 			messages: [{ role: "user", content: WEEKLY_REVIEW_PROMPT(performanceData) }],
 		});
 
@@ -120,6 +122,8 @@ ${ALLOWED_FILES.join("\n")}
 			"self_improvement",
 			response.usage.input_tokens,
 			response.usage.output_tokens,
+			response.usage.cache_creation_input_tokens ?? undefined,
+			response.usage.cache_read_input_tokens ?? undefined,
 		);
 
 		const text = response.content

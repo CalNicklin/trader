@@ -50,6 +50,26 @@ async function runAgent(
 	const allToolCalls: AgentResponse["toolCalls"] = [];
 	let totalInputTokens = 0;
 	let totalOutputTokens = 0;
+	let totalCacheCreationTokens = 0;
+	let totalCacheReadTokens = 0;
+
+	// Set up prompt caching: mark system prompt and last tool for caching
+	const system: Anthropic.TextBlockParam[] = [
+		{
+			type: "text",
+			text: systemPrompt,
+			cache_control: { type: "ephemeral" },
+		},
+	];
+
+	const cachedTools =
+		tools.length > 0
+			? tools.map((tool, i) =>
+					i === tools.length - 1
+						? { ...tool, cache_control: { type: "ephemeral" as const } }
+						: tool,
+				)
+			: undefined;
 
 	const messages: Anthropic.MessageParam[] = [{ role: "user", content: userMessage }];
 
@@ -57,13 +77,15 @@ async function runAgent(
 		const response = await client.messages.create({
 			model: config.CLAUDE_MODEL,
 			max_tokens: 4096,
-			system: systemPrompt,
-			tools: tools.length > 0 ? tools : undefined,
+			system,
+			tools: cachedTools,
 			messages,
 		});
 
 		totalInputTokens += response.usage.input_tokens;
 		totalOutputTokens += response.usage.output_tokens;
+		totalCacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
+		totalCacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
 
 		// Check if we need to process tool calls
 		if (response.stop_reason === "tool_use") {
@@ -125,11 +147,18 @@ async function runAgent(
 					iterations: i + 1,
 					toolCalls: allToolCalls.length,
 					tokens: totalInputTokens + totalOutputTokens,
+					cacheRead: totalCacheReadTokens,
 				},
 				"Agent completed",
 			);
 
-			await recordUsage("trading_analyst", totalInputTokens, totalOutputTokens);
+			await recordUsage(
+				"trading_analyst",
+				totalInputTokens,
+				totalOutputTokens,
+				totalCacheCreationTokens,
+				totalCacheReadTokens,
+			);
 
 			return {
 				text: responseText,

@@ -158,7 +158,9 @@ Return a JSON array of up to 5 insights.`;
 		const response = await client.messages.create({
 			model: config.CLAUDE_MODEL,
 			max_tokens: 2048,
-			system: PATTERN_ANALYZER_SYSTEM,
+			system: [
+				{ type: "text", text: PATTERN_ANALYZER_SYSTEM, cache_control: { type: "ephemeral" } },
+			],
 			messages: [{ role: "user", content: prompt }],
 		});
 
@@ -166,6 +168,8 @@ Return a JSON array of up to 5 insights.`;
 			"pattern_analyzer",
 			response.usage.input_tokens,
 			response.usage.output_tokens,
+			response.usage.cache_creation_input_tokens ?? undefined,
+			response.usage.cache_read_input_tokens ?? undefined,
 		);
 
 		const text = response.content

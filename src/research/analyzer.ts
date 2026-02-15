@@ -61,11 +61,17 @@ Provide your analysis as JSON.`;
 		const response = await client.messages.create({
 			model: config.CLAUDE_MODEL,
 			max_tokens: 1024,
-			system: ANALYSIS_SYSTEM,
+			system: [{ type: "text", text: ANALYSIS_SYSTEM, cache_control: { type: "ephemeral" } }],
 			messages: [{ role: "user", content: prompt }],
 		});
 
-		await recordUsage("research", response.usage.input_tokens, response.usage.output_tokens);
+		await recordUsage(
+			"research",
+			response.usage.input_tokens,
+			response.usage.output_tokens,
+			response.usage.cache_creation_input_tokens ?? undefined,
+			response.usage.cache_read_input_tokens ?? undefined,
+		);
 
 		const text = response.content
 			.filter((b): b is Anthropic.TextBlock => b.type === "text")
