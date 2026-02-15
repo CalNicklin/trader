@@ -1,3 +1,4 @@
+import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { getAccountSummary, getPositions } from "./broker/account.ts";
 import { connect, disconnect } from "./broker/connection.ts";
 import { getConfig } from "./config.ts";
@@ -12,9 +13,10 @@ async function boot() {
 	const config = getConfig();
 	log.info({ env: config.NODE_ENV, paper: config.PAPER_TRADING }, "Trader agent starting");
 
-	// Initialize database
-	getDb();
-	log.info("Database connected");
+	// Initialize database and run migrations
+	const db = getDb();
+	migrate(db, { migrationsFolder: "./drizzle/migrations" });
+	log.info("Database connected and migrated");
 
 	// Run seed (idempotent)
 	await seedDatabase();
