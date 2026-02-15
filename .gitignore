@@ -43,3 +43,12 @@ data/
 # Drizzle generated (migrations are tracked - needed for deployment)
 # drizzle/migrations/*.sql
 # drizzle/migrations/meta/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# SSH keys
+cal_trader
+cal_trader.pub
+trader_ssh
+trader_ssh.pub
