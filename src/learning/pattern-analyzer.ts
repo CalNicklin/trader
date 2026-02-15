@@ -156,7 +156,7 @@ Return a JSON array of up to 5 insights.`;
 		const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
 		const response = await client.messages.create({
-			model: config.CLAUDE_MODEL,
+			model: config.CLAUDE_MODEL_STANDARD,
 			max_tokens: 2048,
 			system: [
 				{ type: "text", text: PATTERN_ANALYZER_SYSTEM, cache_control: { type: "ephemeral" } },

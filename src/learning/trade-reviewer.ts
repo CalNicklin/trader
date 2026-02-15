@@ -101,7 +101,7 @@ Provide your review as JSON.`;
 
 		try {
 			const response = await client.messages.create({
-				model: config.CLAUDE_MODEL_FAST,
+				model: config.CLAUDE_MODEL_STANDARD,
 				max_tokens: 512,
 				system: [
 					{ type: "text", text: TRADE_REVIEWER_SYSTEM, cache_control: { type: "ephemeral" } },

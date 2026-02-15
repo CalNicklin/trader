@@ -4,12 +4,13 @@ import { tokenUsage } from "../db/schema.ts";
 
 // Pricing per million tokens by model tier
 const PRICING = {
+	opus: { input: 15.0, output: 75.0, cacheWrite: 18.75, cacheRead: 1.5 },
 	sonnet: { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
 	haiku: { input: 1.0, output: 5.0, cacheWrite: 1.25, cacheRead: 0.1 },
 } as const;
 
-// Jobs that use the fast (Haiku) model
-const FAST_MODEL_JOBS = new Set(["research", "trade_reviewer"]);
+// Jobs that use the primary (Opus) model
+const OPUS_JOBS = new Set(["trading_analyst"]);
 
 function estimateCost(
 	job: string,
@@ -18,7 +19,7 @@ function estimateCost(
 	cacheCreationTokens?: number,
 	cacheReadTokens?: number,
 ): number {
-	const p = FAST_MODEL_JOBS.has(job) ? PRICING.haiku : PRICING.sonnet;
+	const p = OPUS_JOBS.has(job) ? PRICING.opus : PRICING.sonnet;
 	return (
 		(inputTokens * p.input +
 			outputTokens * p.output +
