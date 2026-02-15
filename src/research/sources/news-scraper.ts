@@ -3,21 +3,42 @@ import { createChildLogger } from "../../utils/logger.ts";
 import { RateLimiter } from "../../utils/rate-limiter.ts";
 
 const log = createChildLogger({ module: "research-news" });
-const parser = new Parser();
-const rateLimiter = new RateLimiter(10, 60000); // 10 feeds per minute
+const parser = new Parser({
+	headers: { "User-Agent": "Mozilla/5.0 (compatible; TraderAgent/1.0)" },
+	timeout: 10000,
+});
+const rateLimiter = new RateLimiter(15, 60000); // 15 feeds per minute
 
 const RSS_FEEDS = [
+	// UK-focused
+	{
+		name: "BBC Business",
+		url: "https://feeds.bbci.co.uk/news/business/rss.xml",
+	},
 	{
 		name: "FT Markets",
 		url: "https://www.ft.com/markets?format=rss",
 	},
 	{
-		name: "Reuters Business",
-		url: "https://feeds.reuters.com/reuters/businessNews",
+		name: "Yahoo Finance UK",
+		url: "https://uk.finance.yahoo.com/rss/topstories",
 	},
 	{
-		name: "BBC Business",
-		url: "https://feeds.bbci.co.uk/news/business/rss.xml",
+		name: "Yahoo Finance FTSE",
+		url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^FTSE&region=UK&lang=en-GB",
+	},
+	{
+		name: "Proactive Investors UK",
+		url: "https://www.proactiveinvestors.co.uk/rss/all_news",
+	},
+	// Global markets
+	{
+		name: "MarketWatch",
+		url: "https://feeds.marketwatch.com/marketwatch/topstories",
+	},
+	{
+		name: "CNBC World",
+		url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19794221",
 	},
 	{
 		name: "Investing.com UK",
@@ -64,16 +85,67 @@ export async function fetchNews(maxItemsPerFeed: number = 10): Promise<NewsItem[
 	return allItems;
 }
 
-/** Filter news for mentions of specific symbols */
-export function filterNewsForSymbols(news: NewsItem[], symbols: string[]): Map<string, NewsItem[]> {
+/**
+ * Well-known LSE symbol-to-name mappings for news matching.
+ * Supplemented at runtime by watchlist names from the database.
+ */
+const SYMBOL_NAMES: Record<string, string[]> = {
+	SHEL: ["Shell"],
+	"BP.": ["BP"],
+	AZN: ["AstraZeneca"],
+	GSK: ["GSK"],
+	ULVR: ["Unilever"],
+	HSBA: ["HSBC"],
+	VOD: ["Vodafone"],
+	BARC: ["Barclays"],
+	LLOY: ["Lloyds"],
+	"RR.": ["Rolls-Royce", "Rolls Royce"],
+	LSEG: ["London Stock Exchange", "LSE Group"],
+	DGE: ["Diageo"],
+	RIO: ["Rio Tinto"],
+	GLEN: ["Glencore"],
+	REL: ["RELX"],
+	AAL: ["Anglo American"],
+	"BA.": ["BAE Systems", "BAE"],
+	"NG.": ["National Grid"],
+	SSE: ["SSE"],
+	AVV: ["Aviva"],
+	PRU: ["Prudential"],
+	TSCO: ["Tesco"],
+	SBRY: ["Sainsbury"],
+	MKS: ["Marks and Spencer", "Marks & Spencer", "M&S"],
+	NWG: ["NatWest"],
+	STAN: ["Standard Chartered"],
+	"BT.A": ["BT Group", "British Telecom"],
+	IMB: ["Imperial Brands"],
+	BATS: ["British American Tobacco", "BAT"],
+	CPG: ["Compass Group"],
+};
+
+/** Filter news for mentions of specific symbols, matching both ticker and company name */
+export function filterNewsForSymbols(
+	news: NewsItem[],
+	symbols: string[],
+	watchlistNames?: Map<string, string>,
+): Map<string, NewsItem[]> {
 	const result = new Map<string, NewsItem[]>();
 
 	for (const symbol of symbols) {
-		const relevant = news.filter(
-			(item) =>
-				item.title.toUpperCase().includes(symbol.toUpperCase()) ||
-				item.snippet.toUpperCase().includes(symbol.toUpperCase()),
-		);
+		// Build search terms: ticker + known names + watchlist name
+		const searchTerms: string[] = [symbol.replace(".", "")]; // strip dots for matching
+		if (symbol.includes(".")) searchTerms.push(symbol); // also match with dot
+
+		const knownNames = SYMBOL_NAMES[symbol];
+		if (knownNames) searchTerms.push(...knownNames);
+
+		const watchlistName = watchlistNames?.get(symbol);
+		if (watchlistName) searchTerms.push(watchlistName);
+
+		const relevant = news.filter((item) => {
+			const text = `${item.title} ${item.snippet}`.toUpperCase();
+			return searchTerms.some((term) => text.includes(term.toUpperCase()));
+		});
+
 		if (relevant.length > 0) {
 			result.set(symbol, relevant);
 		}

@@ -23,8 +23,11 @@ export async function runResearchPipeline(): Promise<void> {
 		// Stage 2: Fetch news for all watchlist symbols
 		const activeWatchlist = await getActiveWatchlist();
 		const symbols = activeWatchlist.map((w) => w.symbol);
+		const watchlistNames = new Map(
+			activeWatchlist.filter((w) => w.name).map((w) => [w.symbol, w.name!]),
+		);
 		const news = await fetchNews(5);
-		const symbolNews = filterNewsForSymbols(news, symbols);
+		const symbolNews = filterNewsForSymbols(news, symbols, watchlistNames);
 
 		// Stage 3: Deep research on stale/priority symbols
 		const staleSymbols = await getStaleSymbols();
