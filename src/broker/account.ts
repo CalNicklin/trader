@@ -1,0 +1,117 @@
+import { createChildLogger } from "../utils/logger.ts";
+import { getApi } from "./connection.ts";
+
+const log = createChildLogger({ module: "broker-account" });
+
+export interface AccountSummary {
+	accountId: string;
+	netLiquidation: number;
+	totalCashValue: number;
+	buyingPower: number;
+	grossPositionValue: number;
+	availableFunds: number;
+}
+
+const SUMMARY_TAGS = "NetLiquidation,TotalCashValue,BuyingPower,GrossPositionValue,AvailableFunds";
+
+/** Fetch current account summary */
+export async function getAccountSummary(): Promise<AccountSummary> {
+	const api = getApi();
+
+	return new Promise((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			sub.unsubscribe();
+			reject(new Error("Account summary timeout after 10s"));
+		}, 10000);
+
+		const sub = api.getAccountSummary("All", SUMMARY_TAGS).subscribe({
+			next: (update) => {
+				const result: Partial<AccountSummary> = {};
+
+				for (const [accountId, tagValues] of update.all) {
+					result.accountId = accountId;
+					for (const [tag, currencyValues] of tagValues) {
+						for (const [, val] of currencyValues) {
+							const numVal = Number(val.value);
+							switch (tag) {
+								case "NetLiquidation":
+									result.netLiquidation = numVal;
+									break;
+								case "TotalCashValue":
+									result.totalCashValue = numVal;
+									break;
+								case "BuyingPower":
+									result.buyingPower = numVal;
+									break;
+								case "GrossPositionValue":
+									result.grossPositionValue = numVal;
+									break;
+								case "AvailableFunds":
+									result.availableFunds = numVal;
+									break;
+							}
+						}
+					}
+				}
+
+				if (result.accountId && result.netLiquidation !== undefined) {
+					clearTimeout(timeout);
+					sub.unsubscribe();
+					const summary = result as AccountSummary;
+					log.info(summary, "Account summary fetched");
+					resolve(summary);
+				}
+			},
+			error: (err) => {
+				clearTimeout(timeout);
+				reject(err);
+			},
+		});
+	});
+}
+
+export interface Position {
+	accountId: string;
+	symbol: string;
+	quantity: number;
+	avgCost: number;
+}
+
+/** Fetch current positions from IBKR */
+export async function getPositions(): Promise<Position[]> {
+	const api = getApi();
+
+	return new Promise((resolve, reject) => {
+		const positions: Position[] = [];
+		const timeout = setTimeout(() => {
+			sub.unsubscribe();
+			// Return whatever we have so far
+			resolve(positions);
+		}, 10000);
+
+		const sub = api.getPositions().subscribe({
+			next: (update) => {
+				for (const [accountId, positionList] of update.all) {
+					for (const pos of positionList) {
+						if (pos.pos !== 0) {
+							positions.push({
+								accountId,
+								symbol: pos.contract.symbol ?? "UNKNOWN",
+								quantity: pos.pos ?? 0,
+								avgCost: pos.avgCost ?? 0,
+							});
+						}
+					}
+				}
+				clearTimeout(timeout);
+				sub.unsubscribe();
+				log.info({ count: positions.length }, "Positions fetched");
+				resolve(positions);
+			},
+			error: (err) => {
+				clearTimeout(timeout);
+				reject(err);
+			},
+		});
+	});
+}

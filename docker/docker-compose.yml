@@ -1,0 +1,48 @@
+services:
+  ib-gateway:
+    image: gnzsnz/ib-gateway:latest
+    restart: unless-stopped
+    ports:
+      - "4002:4002"
+      - "5900:5900"
+    environment:
+      TWS_USERID: ${IBKR_USERNAME}
+      TWS_PASSWORD: ${IBKR_PASSWORD}
+      TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
+      TWS_ACCEPT_INCOMING: "accept"
+      READ_ONLY_API: "no"
+      VNC_SERVER_PASSWORD: ${VNC_PASSWORD:-changeme}
+      TWS_COLD_RESTART: "05:00"
+    volumes:
+      - ib-gateway-data:/opt/ibgateway
+
+  trader:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      ib-gateway:
+        condition: service_started
+    environment:
+      IBKR_HOST: ib-gateway
+      IBKR_PORT: 4002
+      IBKR_CLIENT_ID: 1
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_REPO_OWNER: ${GITHUB_REPO_OWNER}
+      GITHUB_REPO_NAME: ${GITHUB_REPO_NAME:-trader}
+      DB_PATH: /app/data/trader.db
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: production
+      PAPER_TRADING: ${PAPER_TRADING:-true}
+      FMP_API_KEY: ${FMP_API_KEY}
+    volumes:
+      - trader-data:/app/data
+
+volumes:
+  ib-gateway-data:
+  trader-data:
