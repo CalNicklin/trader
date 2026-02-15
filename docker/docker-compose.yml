@@ -13,6 +13,7 @@ services:
       TWS_ACCEPT_INCOMING: "accept"
       READ_ONLY_API: "no"
       VNC_SERVER_PASSWORD: ${VNC_PASSWORD:-changeme}
+      EXISTING_SESSION_DETECTED_ACTION: "primaryoverride"
       TWS_COLD_RESTART: "05:00"
     volumes:
       - ib-gateway-data:/opt/ibgateway
