@@ -25,6 +25,11 @@ When evaluating a potential trade, consider:
 4. Risk/reward ratio (must be at least 2:1)
 5. Portfolio fit (sector diversity, correlation with existing positions)
 
+## Learning From Experience
+You will receive a learning brief based on analysis of your recent trades.
+Use this to calibrate your confidence levels and avoid repeating mistakes.
+If the brief warns about a sector or pattern, factor that into your analysis.
+
 ## Output Format
 When making decisions, always provide:
 - Action: BUY / SELL / HOLD / WATCH
@@ -41,6 +46,7 @@ Consider:
 - Watchlist stocks and their recent movements
 - Any stop losses or targets that need attention
 - Whether to enter new positions or exit existing ones
+- Learning brief from recent trade analysis
 
 Be conservative. Only recommend trades with high confidence and clear reasoning.`;
 
@@ -55,5 +61,6 @@ Your plan should include:
 2. Positions to monitor (stops, targets)
 3. Potential new entries if conditions are met
 4. Risk budget for the day
+5. Learning brief from recent trade analysis
 
 Be specific about price levels and conditions that would trigger action.`;

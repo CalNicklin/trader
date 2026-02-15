@@ -56,6 +56,27 @@ export function startScheduler(): void {
 		}),
 	);
 
+	// Trade review at 17:15 weekdays
+	tasks.push(
+		cron.schedule("15 17 * * 1-5", () => runJobs("trade_review"), {
+			timezone: "Europe/London",
+		}),
+	);
+
+	// Mid-week pattern analysis at 19:00 Wednesday
+	tasks.push(
+		cron.schedule("0 19 * * 3", () => runJobs("mid_week_analysis"), {
+			timezone: "Europe/London",
+		}),
+	);
+
+	// End-of-week pattern analysis at 19:00 Friday
+	tasks.push(
+		cron.schedule("0 19 * * 5", () => runJobs("end_of_week_analysis"), {
+			timezone: "Europe/London",
+		}),
+	);
+
 	// Self-improvement at 20:00 Sunday
 	tasks.push(
 		cron.schedule("0 20 * * 0", () => runJobs("self_improvement"), {

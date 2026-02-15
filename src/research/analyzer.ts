@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getConfig } from "../config.ts";
 import { createChildLogger } from "../utils/logger.ts";
+import { recordUsage } from "../utils/token-tracker.ts";
 
 const log = createChildLogger({ module: "research-analyzer" });
 
@@ -63,6 +64,8 @@ Provide your analysis as JSON.`;
 			system: ANALYSIS_SYSTEM,
 			messages: [{ role: "user", content: prompt }],
 		});
+
+		await recordUsage("research", response.usage.input_tokens, response.usage.output_tokens);
 
 		const text = response.content
 			.filter((b): b is Anthropic.TextBlock => b.type === "text")

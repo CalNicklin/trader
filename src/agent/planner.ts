@@ -3,6 +3,7 @@ import { getConfig } from "../config.ts";
 import { getDb } from "../db/client.ts";
 import { agentLogs } from "../db/schema.ts";
 import { createChildLogger } from "../utils/logger.ts";
+import { recordUsage } from "../utils/token-tracker.ts";
 import { RISK_REVIEWER_SYSTEM } from "./prompts/risk-reviewer.ts";
 import { TRADING_ANALYST_SYSTEM } from "./prompts/trading-analyst.ts";
 import { executeTool, toolDefinitions } from "./tools.ts";
@@ -127,6 +128,8 @@ async function runAgent(
 				},
 				"Agent completed",
 			);
+
+			await recordUsage("trading_analyst", totalInputTokens, totalOutputTokens);
 
 			return {
 				text: responseText,

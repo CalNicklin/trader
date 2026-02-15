@@ -7,11 +7,18 @@ import {
 } from "../agent/prompts/self-improvement.ts";
 import { getConfig } from "../config.ts";
 import { getDb } from "../db/client.ts";
-import { dailySnapshots, improvementProposals, trades } from "../db/schema.ts";
+import {
+	dailySnapshots,
+	improvementProposals,
+	tradeReviews,
+	trades,
+	weeklyInsights,
+} from "../db/schema.ts";
 import { sendEmail } from "../reporting/email.ts";
 import { calculateMetrics } from "../reporting/metrics.ts";
 import { HARD_LIMITS } from "../risk/limits.ts";
 import { createChildLogger } from "../utils/logger.ts";
+import { recordUsage } from "../utils/token-tracker.ts";
 import { generateCodeChange } from "./code-generator.ts";
 import { createPR } from "./github.ts";
 
@@ -65,6 +72,19 @@ export async function runSelfImprovement(): Promise<void> {
 			.orderBy(desc(trades.createdAt))
 			.limit(50);
 
+		// Get accumulated insights and trade reviews
+		const recentInsights = await db
+			.select()
+			.from(weeklyInsights)
+			.where(gte(weeklyInsights.createdAt, twoWeeksAgo))
+			.orderBy(desc(weeklyInsights.createdAt));
+
+		const recentReviews = await db
+			.select()
+			.from(tradeReviews)
+			.where(gte(tradeReviews.createdAt, twoWeeksAgo))
+			.orderBy(desc(tradeReviews.createdAt));
+
 		const performanceData = `
 ## Weekly Metrics
 ${JSON.stringify(metrics, null, 2)}
@@ -74,6 +94,12 @@ ${JSON.stringify(allTimeMetrics, null, 2)}
 
 ## Recent Trades (last 2 weeks)
 ${JSON.stringify(recentTrades, null, 2)}
+
+## Accumulated Insights
+${JSON.stringify(recentInsights, null, 2)}
+
+## Trade Reviews
+${JSON.stringify(recentReviews, null, 2)}
 
 ## Allowed Files for Changes
 ${ALLOWED_FILES.join("\n")}
@@ -89,6 +115,12 @@ ${ALLOWED_FILES.join("\n")}
 			system: SELF_IMPROVEMENT_SYSTEM,
 			messages: [{ role: "user", content: WEEKLY_REVIEW_PROMPT(performanceData) }],
 		});
+
+		await recordUsage(
+			"self_improvement",
+			response.usage.input_tokens,
+			response.usage.output_tokens,
+		);
 
 		const text = response.content
 			.filter((b): b is Anthropic.TextBlock => b.type === "text")

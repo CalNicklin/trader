@@ -2,6 +2,7 @@ import { desc, gte } from "drizzle-orm";
 import { getDb } from "../../db/client.ts";
 import { positions, trades } from "../../db/schema.ts";
 import { createChildLogger } from "../../utils/logger.ts";
+import { getUsageSummary } from "../../utils/token-tracker.ts";
 import { sendEmail } from "../email.ts";
 import { calculateMetrics } from "../metrics.ts";
 
@@ -19,6 +20,11 @@ export async function sendDailySummary(): Promise<void> {
 		.orderBy(desc(trades.createdAt));
 
 	const openPositions = await db.select().from(positions);
+
+	const dailyUsage = await getUsageSummary(1);
+	const weeklyUsage = await getUsageSummary(7);
+	const totalDailyTokens = dailyUsage.totalInputTokens + dailyUsage.totalOutputTokens;
+	const apiCostLine = `Today's API cost: $${dailyUsage.totalCostUsd.toFixed(2)} (${totalDailyTokens.toLocaleString()} tokens) | This week: $${weeklyUsage.totalCostUsd.toFixed(2)}`;
 
 	const pnlColor = metrics.dailyPnl >= 0 ? "#16a34a" : "#dc2626";
 	const pnlSign = metrics.dailyPnl >= 0 ? "+" : "";
@@ -125,6 +131,7 @@ export async function sendDailySummary(): Promise<void> {
 			: ""
 	}
 
+  <p style="color: #9ca3af; font-size: 12px; text-align: center;">${apiCostLine}</p>
   <p style="color: #9ca3af; font-size: 12px; text-align: center;">Trader Agent - Automated daily summary</p>
 </body>
 </html>`.trim();

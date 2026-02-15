@@ -3,6 +3,7 @@ import { getAccountSummary, getPositions as getBrokerPositions } from "../broker
 import { getQuotes } from "../broker/market-data.ts";
 import { getDb } from "../db/client.ts";
 import { agentLogs, dailySnapshots, positions, trades, watchlist } from "../db/schema.ts";
+import { buildLearningBrief, buildRecentContext } from "../learning/context-builder.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { runTradingAnalyst } from "./planner.ts";
@@ -118,11 +119,14 @@ async function onPreMarket(): Promise<void> {
 
 		const positionRows = await db.select().from(positions);
 
+		const learningBrief = await buildLearningBrief();
+
 		const context = `
 Account: ${accountData}
 Positions: ${JSON.stringify(positionRows)}
 Watchlist (top 20): ${JSON.stringify(watchlistItems)}
 Date: ${new Date().toISOString()}
+${learningBrief ? `\n${learningBrief}` : ""}
 `;
 
 		const response = await runTradingAnalyst(`${DAY_PLAN_PROMPT}\n\n${context}`);
@@ -152,10 +156,12 @@ async function onActiveTradingTick(): Promise<void> {
 
 			const symbols = watchlistItems.map((w) => w.symbol);
 			const quotes = await getQuotes(symbols);
+			const recentContext = await buildRecentContext();
 
 			const context = `
 Watchlist quotes: ${JSON.stringify(Object.fromEntries(quotes))}
 Watchlist data: ${JSON.stringify(watchlistItems)}
+${recentContext ? `\n${recentContext}` : ""}
 `;
 			await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${context}`);
 		} else {
@@ -190,6 +196,7 @@ Watchlist data: ${JSON.stringify(watchlistItems)}
 			}
 
 			const account = await getAccountSummary();
+			const recentContext = await buildRecentContext();
 			const context = `
 Account: ${JSON.stringify(account)}
 Positions with current quotes: ${JSON.stringify(
@@ -200,6 +207,7 @@ Positions with current quotes: ${JSON.stringify(
 					ask: quotes.get(p.symbol)?.ask,
 				})),
 			)}
+${recentContext ? `\n${recentContext}` : ""}
 `;
 			await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${context}`);
 		}

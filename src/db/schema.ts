@@ -119,6 +119,52 @@ export const agentLogs = sqliteTable("agent_logs", {
 		.$defaultFn(() => new Date().toISOString()),
 });
 
+export const tradeReviews = sqliteTable("trade_reviews", {
+	id: integer("id").primaryKey({ autoIncrement: true }),
+	tradeId: integer("trade_id").notNull(),
+	symbol: text("symbol").notNull(),
+	side: text("side", { enum: ["BUY", "SELL"] }).notNull(),
+	pnl: real("pnl"),
+	confidence: real("confidence"),
+	outcome: text("outcome", { enum: ["win", "loss", "breakeven"] }).notNull(),
+	reasoningQuality: text("reasoning_quality", {
+		enum: ["sound", "partial", "flawed"],
+	}).notNull(),
+	lessonLearned: text("lesson_learned").notNull(),
+	tags: text("tags").notNull(), // JSON array string
+	shouldRepeat: integer("should_repeat", { mode: "boolean" }).notNull(),
+	createdAt: text("created_at")
+		.notNull()
+		.$defaultFn(() => new Date().toISOString()),
+});
+
+export const weeklyInsights = sqliteTable("weekly_insights", {
+	id: integer("id").primaryKey({ autoIncrement: true }),
+	weekStart: text("week_start").notNull(),
+	runType: text("run_type", { enum: ["mid_week", "end_of_week"] }).notNull(),
+	category: text("category", {
+		enum: ["confidence_calibration", "sector_performance", "timing", "risk_management", "general"],
+	}).notNull(),
+	insight: text("insight").notNull(),
+	actionable: text("actionable").notNull(),
+	severity: text("severity", { enum: ["info", "warning", "critical"] }).notNull(),
+	data: text("data"), // JSON string with supporting numbers
+	createdAt: text("created_at")
+		.notNull()
+		.$defaultFn(() => new Date().toISOString()),
+});
+
+export const tokenUsage = sqliteTable("token_usage", {
+	id: integer("id").primaryKey({ autoIncrement: true }),
+	job: text("job").notNull(),
+	inputTokens: integer("input_tokens").notNull(),
+	outputTokens: integer("output_tokens").notNull(),
+	estimatedCostUsd: real("estimated_cost_usd").notNull(),
+	createdAt: text("created_at")
+		.notNull()
+		.$defaultFn(() => new Date().toISOString()),
+});
+
 export const improvementProposals = sqliteTable("improvement_proposals", {
 	id: integer("id").primaryKey({ autoIncrement: true }),
 	title: text("title").notNull(),

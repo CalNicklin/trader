@@ -11,7 +11,10 @@ export type JobName =
 	| "daily_summary"
 	| "weekly_summary"
 	| "research_pipeline"
-	| "self_improvement";
+	| "self_improvement"
+	| "trade_review"
+	| "mid_week_analysis"
+	| "end_of_week_analysis";
 
 let jobRunning = false;
 
@@ -55,6 +58,24 @@ export async function runJobs(name: JobName): Promise<void> {
 			case "self_improvement": {
 				const { runSelfImprovement } = await import("../self-improve/monitor.ts");
 				await runSelfImprovement();
+				break;
+			}
+
+			case "trade_review": {
+				const { runTradeReview } = await import("../learning/trade-reviewer.ts");
+				await runTradeReview();
+				break;
+			}
+
+			case "mid_week_analysis": {
+				const { runPatternAnalysis } = await import("../learning/pattern-analyzer.ts");
+				await runPatternAnalysis("mid_week");
+				break;
+			}
+
+			case "end_of_week_analysis": {
+				const { runPatternAnalysis } = await import("../learning/pattern-analyzer.ts");
+				await runPatternAnalysis("end_of_week");
 				break;
 			}
 		}
