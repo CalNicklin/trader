@@ -39,6 +39,6 @@ data/
 *.db-journal
 *.db-wal
 
-# Drizzle generated
-drizzle/migrations/*.sql
-drizzle/migrations/meta/
+# Drizzle generated (migrations are tracked - needed for deployment)
+# drizzle/migrations/*.sql
+# drizzle/migrations/meta/
