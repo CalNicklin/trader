@@ -7,6 +7,7 @@ import { withRetry } from "../utils/retry.ts";
 const log = createChildLogger({ module: "broker-connection" });
 
 let _api: IBApiNext | null = null;
+let _connected = false;
 let _wasConnected = false;
 let _disconnectAlerted = false;
 let _lastDisconnectEmailAt = 0;
@@ -54,25 +55,42 @@ export async function connect(): Promise<IBApiNext> {
 		{ maxAttempts: 5, baseDelayMs: 3000 },
 	);
 
-	// Monitor for unexpected disconnects after successful connection
+	// Monitor connection state changes
+	_connected = true;
 	_wasConnected = true;
 	_disconnectAlerted = false;
 	api.connectionState.subscribe((state) => {
-		if (state === ConnectionState.Disconnected && _wasConnected && !_disconnectAlerted) {
-			_disconnectAlerted = true;
-			log.error("IBKR connection lost after being connected");
-			const now = Date.now();
-			if (now - _lastDisconnectEmailAt >= DISCONNECT_EMAIL_COOLDOWN_MS) {
-				_lastDisconnectEmailAt = now;
-				sendCriticalAlert(
-					"IBKR disconnected",
-					"Connection to IBKR was lost unexpectedly. The agent will attempt to reconnect automatically.",
-				);
-			} else {
-				log.warn("Suppressing disconnect email (cooldown active)");
+		if (state === ConnectionState.Disconnected) {
+			_connected = false;
+			if (_wasConnected && !_disconnectAlerted) {
+				_disconnectAlerted = true;
+				log.error("IBKR connection lost after being connected");
+				const now = Date.now();
+				if (now - _lastDisconnectEmailAt >= DISCONNECT_EMAIL_COOLDOWN_MS) {
+					_lastDisconnectEmailAt = now;
+					sendCriticalAlert(
+						"IBKR disconnected",
+						"Connection to IBKR was lost unexpectedly. The agent will attempt to reconnect automatically.",
+					);
+				} else {
+					log.warn("Suppressing disconnect email (cooldown active)");
+				}
 			}
 		} else if (state === ConnectionState.Connected) {
+			const wasDisconnected = !_connected;
+			_connected = true;
 			_disconnectAlerted = false;
+			if (wasDisconnected && _wasConnected) {
+				log.info("IBKR connection re-established after disconnect");
+				api
+					.getCurrentTime()
+					.then((time: number) => {
+						log.info({ serverTime: time }, "IBKR reconnection health check passed");
+					})
+					.catch((err: unknown) => {
+						log.warn({ error: err }, "IBKR reconnection health check failed");
+					});
+			}
 		}
 	});
 
@@ -88,5 +106,21 @@ export async function disconnect(): Promise<void> {
 }
 
 export function isConnected(): boolean {
-	return _api !== null;
+	return _api !== null && _connected;
+}
+
+export function waitForConnection(timeoutMs = 60000): Promise<boolean> {
+	if (_connected) return Promise.resolve(true);
+	return new Promise((resolve) => {
+		const start = Date.now();
+		const interval = setInterval(() => {
+			if (_connected) {
+				clearInterval(interval);
+				resolve(true);
+			} else if (Date.now() - start >= timeoutMs) {
+				clearInterval(interval);
+				resolve(false);
+			}
+		}, 1000);
+	});
 }

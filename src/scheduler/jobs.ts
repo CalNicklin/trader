@@ -1,4 +1,5 @@
 import { tick } from "../agent/orchestrator.ts";
+import { isConnected } from "../broker/connection.ts";
 import { createChildLogger } from "../utils/logger.ts";
 
 const log = createChildLogger({ module: "scheduler-jobs" });
@@ -16,11 +17,24 @@ export type JobName =
 	| "mid_week_analysis"
 	| "end_of_week_analysis";
 
+const BROKER_JOBS: ReadonlySet<JobName> = new Set([
+	"orchestrator_tick",
+	"mini_analysis",
+	"pre_market",
+	"post_market",
+	"daily_summary",
+]);
+
 let jobRunning = false;
 
 export async function runJobs(name: JobName): Promise<void> {
 	if (jobRunning) {
 		log.debug({ job: name }, "Skipping - previous job still running");
+		return;
+	}
+
+	if (BROKER_JOBS.has(name) && !isConnected()) {
+		log.warn({ job: name }, "Skipping - IBKR not connected");
 		return;
 	}
 

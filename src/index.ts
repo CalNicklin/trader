@@ -72,8 +72,30 @@ process.on("uncaughtException", (error) => {
 	);
 });
 
+const rejectionTimestamps: number[] = [];
+const REJECTION_WINDOW_MS = 60_000;
+const REJECTION_THRESHOLD = 10;
+
 process.on("unhandledRejection", (reason) => {
-	log.fatal({ reason }, "Unhandled rejection");
+	log.error({ reason }, "Unhandled rejection");
+
+	const now = Date.now();
+	rejectionTimestamps.push(now);
+	// Remove entries older than the window
+	while (rejectionTimestamps.length > 0 && rejectionTimestamps[0]! <= now - REJECTION_WINDOW_MS) {
+		rejectionTimestamps.shift();
+	}
+
+	if (rejectionTimestamps.length >= REJECTION_THRESHOLD) {
+		log.fatal(
+			{ count: rejectionTimestamps.length, windowMs: REJECTION_WINDOW_MS },
+			"Too many unhandled rejections - exiting",
+		);
+		sendCriticalAlert(
+			"Trader crash: rejection storm",
+			`${rejectionTimestamps.length} unhandled rejections in ${REJECTION_WINDOW_MS / 1000}s. Last: ${String(reason)}`,
+		).finally(() => process.exit(1));
+	}
 });
 
 boot().catch(async (error) => {
