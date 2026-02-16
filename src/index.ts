@@ -4,6 +4,7 @@ import { connect, disconnect } from "./broker/connection.ts";
 import { getConfig } from "./config.ts";
 import { closeDb, getDb } from "./db/client.ts";
 import { seedDatabase } from "./db/seed.ts";
+import { startAdminServer, stopAdminServer } from "./admin/server.ts";
 import { startScheduler, stopScheduler } from "./scheduler/cron.ts";
 import { sendCriticalAlert } from "./utils/alert.ts";
 import { getLogger } from "./utils/logger.ts";
@@ -46,14 +47,16 @@ async function boot() {
 		log.info("No open positions");
 	}
 
-	// Start the scheduler
+	// Start the scheduler and admin server
 	startScheduler();
+	startAdminServer();
 	log.info("Scheduler started - agent is running");
 }
 
 // Graceful shutdown
 async function shutdown(signal: string) {
 	log.info({ signal }, "Shutting down...");
+	stopAdminServer();
 	stopScheduler();
 	await disconnect();
 	closeDb();

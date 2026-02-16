@@ -39,6 +39,13 @@ ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh 
 ```
 Timestamps in `agent_logs` use ISO format with `T` separator (e.g. `2026-02-16T07:30:04.523Z`). Use `LIKE '"'"'2026-02-16T07:%'"'"'` for time-based queries within the SSH quoting.
 
+### Triggering jobs manually
+Run any scheduled job on demand (uses the running trader process and its IBKR connection):
+```bash
+ssh deploy@46.225.127.44 'docker exec docker-trader-1 curl -sX POST http://localhost:3847/jobs/<JOB_NAME>'
+```
+Valid jobs: `orchestrator_tick`, `mini_analysis`, `pre_market`, `post_market`, `daily_summary`, `weekly_summary`, `research_pipeline`, `self_improvement`, `trade_review`, `mid_week_analysis`, `end_of_week_analysis`
+
 - See `docs/monitoring.md` for full SSH cheat sheet and useful queries
 
 ## Conventions
