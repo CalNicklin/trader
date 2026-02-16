@@ -40,7 +40,7 @@ The database is inside a Docker volume. The trader container does **not** have `
 
 **Trigger a job manually:**
 ```bash
-ssh deploy@46.225.127.44 'docker exec docker-trader-1 curl -sX POST http://localhost:3847/jobs/research_pipeline'
+ssh deploy@46.225.127.44 'docker exec docker-trader-1 bun -e "const r = await fetch(\"http://localhost:3847/jobs/research_pipeline\", {method:\"POST\"}); console.log(await r.json())"'
 ```
 Valid jobs: `orchestrator_tick`, `mini_analysis`, `pre_market`, `post_market`, `daily_summary`, `weekly_summary`, `research_pipeline`, `self_improvement`, `trade_review`, `mid_week_analysis`, `end_of_week_analysis`
 
