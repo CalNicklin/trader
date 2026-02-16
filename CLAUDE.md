@@ -22,13 +22,23 @@ Automated trading agent for IBKR UK Stocks & Shares ISA.
 - `bun test` - Run tests
 
 ## Deployment
-- **Server**: `ssh deploy@46.225.127.44`, project at `~/trader`
+- **CI/CD**: GitHub Actions (`.github/workflows/deploy.yml`) — pushes to `main` trigger lint/typecheck/test, then SSH deploy
+- **Deploy workflow**: git pull on server → `docker compose build trader` → `docker compose up -d trader`
+- **Server**: `ssh deploy@46.225.127.44`, project at `~/trader` (deploy action uses `/opt/trader`)
 - **Runtime**: Docker Compose (`docker/docker-compose.yml`) — two containers: `ib-gateway` (gnzsnz/ib-gateway) + `trader`
-- **DB in container**: `/app/data/trader.db` (persisted via `trader-data` volume)
-- **IB Gateway**: cold restart at 05:00, VNC on port 5900
-- **Logs**: `docker compose -f docker/docker-compose.yml logs -f trader --tail 50`
-- **DB query**: `docker compose -f docker/docker-compose.yml exec trader sh -c "sqlite3 /app/data/trader.db '<SQL>'"`
-- **Restart**: `docker compose -f docker/docker-compose.yml restart trader`
+- **DB in container**: `/app/data/trader.db` (persisted via `docker_trader-data` volume)
+- **IB Gateway**: cold restart at 05:00 UTC, VNC on port 5900, healthcheck on port 4004
+- **Logs**: `ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml logs trader --tail 50"`
+- **Container status**: `ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml ps"`
+- **Restart**: `ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml restart trader"`
+
+### Querying the database
+The trader container does **not** have `sqlite3` installed. To query the DB, use a temporary Alpine container against the volume:
+```bash
+ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh -c "apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/trader.db \"<SQL>\""'
+```
+Timestamps in `agent_logs` use ISO format with `T` separator (e.g. `2026-02-16T07:30:04.523Z`). Use `LIKE '"'"'2026-02-16T07:%'"'"'` for time-based queries within the SSH quoting.
+
 - See `docs/monitoring.md` for full SSH cheat sheet and useful queries
 
 ## Conventions
