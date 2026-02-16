@@ -1,4 +1,5 @@
 import { BarSizeSetting, IBApiTickType } from "@stoqey/ib";
+import { getFMPQuotes } from "../research/sources/fmp.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { getApi } from "./connection.ts";
 import { lseStock } from "./contracts.ts";
@@ -60,12 +61,26 @@ export async function getQuotes(symbols: string[]): Promise<Map<string, Quote>> 
 	const quotes = new Map<string, Quote>();
 	const results = await Promise.allSettled(symbols.map((s) => getQuote(s)));
 
+	const failedSymbols: string[] = [];
 	for (let i = 0; i < symbols.length; i++) {
 		const result = results[i]!;
 		if (result.status === "fulfilled") {
 			quotes.set(symbols[i]!, result.value);
 		} else {
 			log.warn({ symbol: symbols[i], error: result.reason }, "Failed to get quote");
+			failedSymbols.push(symbols[i]!);
+		}
+	}
+
+	if (failedSymbols.length > 0) {
+		try {
+			const fmpQuotes = await getFMPQuotes(failedSymbols);
+			for (const [symbol, quote] of fmpQuotes) {
+				quotes.set(symbol, quote);
+				log.info({ symbol, last: quote.last }, "FMP fallback quote");
+			}
+		} catch (error) {
+			log.warn({ error, symbols: failedSymbols }, "FMP fallback failed");
 		}
 	}
 

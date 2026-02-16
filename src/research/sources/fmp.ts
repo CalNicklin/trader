@@ -1,3 +1,4 @@
+import type { Quote } from "../../broker/market-data.ts";
 import { getConfig } from "../../config.ts";
 import { createChildLogger } from "../../utils/logger.ts";
 import { RateLimiter } from "../../utils/rate-limiter.ts";
@@ -62,6 +63,42 @@ export interface FMPRatios {
 export async function getFMPRatios(symbol: string): Promise<FMPRatios | null> {
 	const result = await fmpFetch<FMPRatios[]>(`/ratios-ttm/${symbol}.L`);
 	return result?.[0] ?? null;
+}
+
+interface FMPQuote {
+	symbol: string;
+	price: number;
+	dayHigh: number;
+	dayLow: number;
+	previousClose: number;
+	volume: number;
+}
+
+/** Get real-time quotes from FMP for multiple LSE symbols */
+export async function getFMPQuotes(symbols: string[]): Promise<Map<string, Quote>> {
+	const quotes = new Map<string, Quote>();
+	if (symbols.length === 0) return quotes;
+
+	const fmpSymbols = symbols.map((s) => `${s}.L`).join(",");
+	const result = await fmpFetch<FMPQuote[]>(`/quote/${fmpSymbols}`);
+	if (!result) return quotes;
+
+	for (const q of result) {
+		const symbol = q.symbol.replace(".L", "");
+		quotes.set(symbol, {
+			symbol,
+			bid: null,
+			ask: null,
+			last: q.price,
+			volume: q.volume,
+			high: q.dayHigh,
+			low: q.dayLow,
+			close: q.previousClose,
+			timestamp: new Date(),
+		});
+	}
+
+	return quotes;
 }
 
 /** Get gainers/losers from LSE */
