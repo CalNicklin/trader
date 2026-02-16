@@ -143,14 +143,13 @@ ${learningBrief ? `\n${learningBrief}` : ""}
 	}
 }
 
-interface PreFilterResult {
-	shouldRun: boolean;
+interface MarketState {
 	reasons: string[];
 	quotes: Map<string, Quote>;
 }
 
-/** Tier 1: Code pre-filter — checks if anything warrants a Claude call */
-async function shouldRunAnalysis(): Promise<PreFilterResult> {
+/** Tier 1: Gather market state and flag notable changes */
+async function shouldRunAnalysis(): Promise<MarketState> {
 	const reasons: string[] = [];
 	const db = getDb();
 
@@ -207,20 +206,17 @@ async function shouldRunAnalysis(): Promise<PreFilterResult> {
 		reasons.push(`Actionable research: ${actions}`);
 	}
 
-	return { shouldRun: reasons.length > 0, reasons, quotes };
+	return { reasons, quotes };
 }
 
 /** Active trading tick: three-tier analysis (pre-filter -> Haiku -> Sonnet) */
 async function onActiveTradingTick(): Promise<void> {
 	try {
-		// === Tier 1: Code pre-filter (FREE) ===
+		// === Tier 1: Gather market state (quotes, positions, research) ===
 		const preFilter = await shouldRunAnalysis();
-		if (!preFilter.shouldRun) {
-			log.info("Quiet tick — nothing changed, skipping analysis");
-			return;
+		if (preFilter.reasons.length > 0) {
+			log.info({ reasons: preFilter.reasons }, "Pre-filter: notable changes detected");
 		}
-
-		log.info({ reasons: preFilter.reasons }, "Pre-filter triggered");
 
 		const db = getDb();
 		const positionRows = await db.select().from(positions);
@@ -287,7 +283,7 @@ async function onActiveTradingTick(): Promise<void> {
 			.from(trades)
 			.where(eq(trades.status, "SUBMITTED"));
 
-		const scanContext = `Pre-filter reasons: ${preFilter.reasons.join("; ")}
+		const scanContext = `Notable changes: ${preFilter.reasons.length > 0 ? preFilter.reasons.join("; ") : "None — routine monitoring tick"}
 Positions: ${positionRows.length === 0 ? "None" : JSON.stringify(positionRows.map((p) => ({ symbol: p.symbol, qty: p.quantity, avgCost: p.avgCost, currentPrice: p.currentPrice, pnl: p.unrealizedPnl })))}
 Pending orders: ${pendingOrders.length === 0 ? "None" : JSON.stringify(pendingOrders)}
 Quotes: ${quoteSummary}
