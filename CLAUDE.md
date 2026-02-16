@@ -24,7 +24,7 @@ Automated trading agent for IBKR UK Stocks & Shares ISA.
 ## Deployment
 - **CI/CD**: GitHub Actions (`.github/workflows/deploy.yml`) — pushes to `main` trigger lint/typecheck/test, then SSH deploy
 - **Deploy workflow**: git pull on server → `docker compose build trader` → `docker compose up -d trader`
-- **Server**: `ssh deploy@46.225.127.44`, project at `~/trader` (deploy action uses `/opt/trader`)
+- **Server**: `ssh deploy@46.225.127.44`, project at `~/trader`
 - **Runtime**: Docker Compose (`docker/docker-compose.yml`) — two containers: `ib-gateway` (gnzsnz/ib-gateway) + `trader`
 - **DB in container**: `/app/data/trader.db` (persisted via `docker_trader-data` volume)
 - **IB Gateway**: cold restart at 05:00 UTC, VNC on port 5900, healthcheck on port 4004

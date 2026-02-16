@@ -33,7 +33,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd /opt/trader
+            cd ~/trader
             git pull origin main
             docker compose -f docker/docker-compose.yml build trader
             docker compose -f docker/docker-compose.yml up -d trader
