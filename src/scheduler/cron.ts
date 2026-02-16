@@ -14,13 +14,6 @@ export function startScheduler(): void {
 		}),
 	);
 
-	// Mini-analysis every 15 minutes during market hours (8:00-16:25)
-	tasks.push(
-		cron.schedule("*/15 8-15 * * 1-5", () => runJobs("mini_analysis"), {
-			timezone: "Europe/London",
-		}),
-	);
-
 	// Pre-market at 7:30
 	tasks.push(
 		cron.schedule("30 7 * * 1-5", () => runJobs("pre_market"), {
