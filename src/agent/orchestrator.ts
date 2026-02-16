@@ -1,15 +1,22 @@
 import { desc, eq, gte } from "drizzle-orm";
 import { getAccountSummary, getPositions as getBrokerPositions } from "../broker/account.ts";
+import type { Quote } from "../broker/market-data.ts";
 import { getQuotes } from "../broker/market-data.ts";
 import { getDb } from "../db/client.ts";
-import { agentLogs, dailySnapshots, positions, trades, watchlist } from "../db/schema.ts";
+import { agentLogs, dailySnapshots, positions, research, trades, watchlist } from "../db/schema.ts";
 import { buildLearningBrief, buildRecentContext } from "../learning/context-builder.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
-import { runTradingAnalyst } from "./planner.ts";
+import { runQuickScan, runTradingAnalyst } from "./planner.ts";
 import { DAY_PLAN_PROMPT, MINI_ANALYSIS_PROMPT } from "./prompts/trading-analyst.ts";
 
 const log = createChildLogger({ module: "orchestrator" });
+
+/** In-memory cache of last-seen quotes for price move detection */
+const lastQuotes = new Map<string, number>();
+
+/** Price move threshold to trigger analysis */
+const PRICE_MOVE_THRESHOLD = 0.02; // 2%
 
 export type OrchestratorState =
 	| "idle"
@@ -136,45 +143,94 @@ ${learningBrief ? `\n${learningBrief}` : ""}
 	}
 }
 
-/** Active trading tick: refresh data, check positions, run mini-analysis */
+interface PreFilterResult {
+	shouldRun: boolean;
+	reasons: string[];
+	quotes: Map<string, Quote>;
+}
+
+/** Tier 1: Code pre-filter — checks if anything warrants a Claude call */
+async function shouldRunAnalysis(): Promise<PreFilterResult> {
+	const reasons: string[] = [];
+	const db = getDb();
+
+	// Check for open positions (need monitoring)
+	const positionRows = await db.select().from(positions);
+	if (positionRows.length > 0) {
+		reasons.push(`${positionRows.length} open position(s) to monitor`);
+	}
+
+	// Check for pending/submitted orders
+	const pendingOrders = await db.select().from(trades).where(eq(trades.status, "SUBMITTED"));
+	if (pendingOrders.length > 0) {
+		reasons.push(`${pendingOrders.length} pending order(s)`);
+	}
+
+	// Get watchlist quotes and check for price moves
+	const watchlistItems = await db
+		.select()
+		.from(watchlist)
+		.where(eq(watchlist.active, true))
+		.orderBy(desc(watchlist.score))
+		.limit(10);
+
+	const symbols = watchlistItems.map((w) => w.symbol);
+	const quotes = await getQuotes(symbols);
+
+	for (const [symbol, quote] of quotes) {
+		if (!quote.last) continue;
+		const lastPrice = lastQuotes.get(symbol);
+		if (lastPrice) {
+			const move = Math.abs(quote.last - lastPrice) / lastPrice;
+			if (move >= PRICE_MOVE_THRESHOLD) {
+				reasons.push(`${symbol} moved ${(move * 100).toFixed(1)}%`);
+			}
+		}
+		lastQuotes.set(symbol, quote.last);
+	}
+
+	// Check for new research with BUY or SELL signals (last 24h)
+	const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+	const actionableResearch = await db
+		.select()
+		.from(research)
+		.where(gte(research.createdAt, oneDayAgo));
+
+	const buyOrSell = actionableResearch.filter(
+		(r) => r.suggestedAction === "BUY" || r.suggestedAction === "SELL",
+	);
+	if (buyOrSell.length > 0) {
+		const actions = buyOrSell.map((r) => `${r.symbol}:${r.suggestedAction}`).join(", ");
+		reasons.push(`Actionable research: ${actions}`);
+	}
+
+	return { shouldRun: reasons.length > 0, reasons, quotes };
+}
+
+/** Active trading tick: three-tier analysis (pre-filter -> Haiku -> Sonnet) */
 async function onActiveTradingTick(): Promise<void> {
 	try {
+		// === Tier 1: Code pre-filter (FREE) ===
+		const preFilter = await shouldRunAnalysis();
+		if (!preFilter.shouldRun) {
+			log.info("Quiet tick — nothing changed, skipping analysis");
+			return;
+		}
+
+		log.info({ reasons: preFilter.reasons }, "Pre-filter triggered");
+
 		const db = getDb();
-
-		// Get current positions
 		const positionRows = await db.select().from(positions);
-		if (positionRows.length === 0) {
-			// No positions - get watchlist for potential entries
-			const watchlistItems = await db
-				.select()
-				.from(watchlist)
-				.where(eq(watchlist.active, true))
-				.orderBy(desc(watchlist.score))
-				.limit(10);
 
-			if (watchlistItems.length === 0) return;
+		// Update position prices if we have positions
+		if (positionRows.length > 0) {
+			const posSymbols = positionRows.map((p) => p.symbol);
+			const posQuotes = await getQuotes(posSymbols);
 
-			const symbols = watchlistItems.map((w) => w.symbol);
-			const quotes = await getQuotes(symbols);
-			const recentContext = await buildRecentContext();
-
-			const context = `
-Watchlist quotes: ${JSON.stringify(Object.fromEntries(quotes))}
-Watchlist data: ${JSON.stringify(watchlistItems)}
-${recentContext ? `\n${recentContext}` : ""}
-`;
-			await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${context}`);
-		} else {
-			// Have positions - monitor them
-			const symbols = positionRows.map((p) => p.symbol);
-			const quotes = await getQuotes(symbols);
-
-			// Check for stop loss hits
 			for (const pos of positionRows) {
-				const quote = quotes.get(pos.symbol);
+				const quote = posQuotes.get(pos.symbol);
 				if (!quote?.last) continue;
 
-				// Update position current price
 				await db
 					.update(positions)
 					.set({
@@ -185,32 +241,104 @@ ${recentContext ? `\n${recentContext}` : ""}
 					})
 					.where(eq(positions.id, pos.id));
 
-				// Check stop loss
 				if (pos.stopLossPrice && quote.last <= pos.stopLossPrice) {
 					log.warn(
 						{ symbol: pos.symbol, price: quote.last, stopLoss: pos.stopLossPrice },
 						"Stop loss triggered!",
 					);
-					// Agent will handle the sell in its analysis
 				}
 			}
+		}
 
+		// Build context for Haiku scan
+		const watchlistItems = await db
+			.select()
+			.from(watchlist)
+			.where(eq(watchlist.active, true))
+			.orderBy(desc(watchlist.score))
+			.limit(10);
+
+		const quoteSummary = [...preFilter.quotes.entries()]
+			.map(([sym, q]) => `${sym}: ${q.last ?? "N/A"}`)
+			.join(", ");
+
+		const recentResearch = await db
+			.select({
+				symbol: research.symbol,
+				action: research.suggestedAction,
+				confidence: research.confidence,
+				sentiment: research.sentiment,
+			})
+			.from(research)
+			.where(gte(research.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()))
+			.orderBy(desc(research.createdAt));
+
+		const pendingOrders = await db
+			.select({
+				id: trades.id,
+				symbol: trades.symbol,
+				side: trades.side,
+				limitPrice: trades.limitPrice,
+				status: trades.status,
+			})
+			.from(trades)
+			.where(eq(trades.status, "SUBMITTED"));
+
+		const scanContext = `Pre-filter reasons: ${preFilter.reasons.join("; ")}
+Positions: ${positionRows.length === 0 ? "None" : JSON.stringify(positionRows.map((p) => ({ symbol: p.symbol, qty: p.quantity, avgCost: p.avgCost, currentPrice: p.currentPrice, pnl: p.unrealizedPnl })))}
+Pending orders: ${pendingOrders.length === 0 ? "None" : JSON.stringify(pendingOrders)}
+Quotes: ${quoteSummary}
+Research signals: ${recentResearch.length === 0 ? "None" : JSON.stringify(recentResearch)}
+Watchlist top scores: ${watchlistItems
+			.slice(0, 5)
+			.map((w) => `${w.symbol}(${w.score})`)
+			.join(", ")}`;
+
+		// === Tier 2: Haiku quick scan (~$0.02) ===
+		const scan = await runQuickScan(scanContext);
+
+		if (!scan.escalate) {
+			log.info({ reason: scan.reason }, "Haiku scan: no escalation needed");
+			const dbForLog = getDb();
+			await dbForLog.insert(agentLogs).values({
+				level: "INFO",
+				phase: "trading",
+				message: `Quick scan: ${scan.reason}`,
+			});
+			return;
+		}
+
+		// === Tier 3: Full Sonnet agent loop (~$1.70) ===
+		log.info({ reason: scan.reason }, "Escalating to full Sonnet analysis");
+
+		const recentContext = await buildRecentContext();
+		let fullContext: string;
+
+		if (positionRows.length === 0) {
+			fullContext = `
+Watchlist quotes: ${JSON.stringify(Object.fromEntries(preFilter.quotes))}
+Watchlist data: ${JSON.stringify(watchlistItems)}
+${recentContext ? `\n${recentContext}` : ""}
+Escalation reason: ${scan.reason}
+`;
+		} else {
 			const account = await getAccountSummary();
-			const recentContext = await buildRecentContext();
-			const context = `
+			fullContext = `
 Account: ${JSON.stringify(account)}
 Positions with current quotes: ${JSON.stringify(
 				positionRows.map((p) => ({
 					...p,
-					currentPrice: quotes.get(p.symbol)?.last,
-					bid: quotes.get(p.symbol)?.bid,
-					ask: quotes.get(p.symbol)?.ask,
+					currentPrice: preFilter.quotes.get(p.symbol)?.last,
+					bid: preFilter.quotes.get(p.symbol)?.bid,
+					ask: preFilter.quotes.get(p.symbol)?.ask,
 				})),
 			)}
 ${recentContext ? `\n${recentContext}` : ""}
+Escalation reason: ${scan.reason}
 `;
-			await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${context}`);
 		}
+
+		await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${fullContext}`);
 	} catch (error) {
 		log.error({ error }, "Active trading tick failed");
 	}

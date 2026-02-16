@@ -4,6 +4,34 @@ Autonomous trading agent for an IBKR UK Stocks & Shares ISA. Uses Claude as the 
 
 Runs on a VPS via Docker, connecting to IB Gateway for LSE-listed equities. Currently paper trading.
 
+## Vision and Goals
+
+This is an **agentic learning system** that operates within the London Stock Exchange, designed to evolve its own trading strategy over time.
+
+### Core Principles
+
+- **Learn from every decision.** The agent logs its reasoning behind each trade. Post-market reviews assess what worked and what didn't. Pattern analysis identifies systematic biases. Over weeks and months, this feedback loop builds a strategy that improves through experience, not just rules.
+
+- **Earn its keep.** The system must generate enough returns to cover its own running costs. Paper trading now, real money later. This is the hard constraint — the agent has a real goal it must succeed at, not just a sandbox to play in.
+
+- **Be an expert trader.** The agent has the entire wealth of the internet's knowledge in its training data. It should reason about fundamentals, technicals, sentiment, macro conditions, and sector dynamics like a professional analyst would. It should know when to be patient and when to act decisively.
+
+- **Actively seek information.** The agent doesn't wait for data to arrive — it reaches out. It screens stocks across sectors and market caps, scrapes financial news from multiple sources, runs on-demand research before trading, and discovers new opportunities from breaking headlines. An informed decision is a better decision.
+
+- **Evolve its own code.** Each week, the agent reviews its performance and proposes improvements to its own prompts and configuration via GitHub PRs. A human reviews and merges. The system's intelligence is not static — it compounds.
+
+- **Respect boundaries.** Exclusion lists, risk limits, position sizing, sector caps, and auto-pause thresholds are non-negotiable guardrails. The agent operates within ISA rules (cash-only, long-only, GBP/LSE).
+
+### Agentic Architecture
+
+The system uses a **tiered orchestrator pattern** for cost-effective continuous monitoring:
+
+1. **Code pre-filter** (free) — checks if positions, orders, price moves, or research signals require attention. Skips Claude entirely on quiet ticks.
+2. **Haiku quick scan** (~$0.02) — single-call triage: should we escalate to a full analysis? No tool use, just a yes/no decision.
+3. **Sonnet agent loop** (~$1.70) — full agentic analysis with tool use. Fetches data, researches stocks, evaluates risk, places or cancels orders.
+
+This means the agent monitors continuously during market hours without burning money on repetitive "nothing to do" analysis. Sonnet's reasoning power is reserved for moments that matter.
+
 ## Stack
 
 | Layer | Technology |
@@ -22,6 +50,9 @@ Runs on a VPS via Docker, connecting to IB Gateway for LSE-listed equities. Curr
 src/
   index.ts                    # Boot: DB migrate, IBKR connect, start scheduler
   config.ts                   # Zod-validated env config
+
+  admin/
+    server.ts                  # HTTP endpoint for ad-hoc job triggers (port 3847)
 
   agent/
     orchestrator.ts            # State machine: pre-market -> open -> wind-down -> post-market
@@ -98,14 +129,13 @@ src/
 | Time | Job | Description |
 |------|-----|-------------|
 | 07:30 | Pre-market | Sync account, reconcile positions, generate day plan with learning brief |
-| 08:00-16:00 | Orchestrator tick | Every 5 min: monitor positions, update prices, check stop losses |
-| 08:00-15:45 | Mini-analysis | Every 15 min: Claude evaluates current positions and watchlist |
+| 07:00-16:00 | Orchestrator tick | Every 20 min: three-tier analysis (pre-filter -> Haiku scan -> Sonnet if needed) |
 | 16:25-16:30 | Wind-down | No new orders |
 | 16:35 | Post-market | Reconcile positions, record daily snapshot |
 | 17:00 | Daily summary | Email with portfolio, P&L, trades, performance metrics, API costs |
 | 17:15 | Trade review | Claude reviews each filled trade, extracts lessons and patterns |
 | 17:30 (Fri) | Weekly summary | Week-over-week performance email |
-| 18:00 | Research pipeline | Analyze watchlist stocks via Yahoo Finance, FMP, news feeds |
+| 18:00 | Research pipeline | Screen stocks (FMP), discover from news (Haiku), deep-analyse watchlist |
 | 19:00 (Wed) | Mid-week analysis | Pattern analyzer identifies trends from accumulated trade reviews |
 | 19:00 (Fri) | End-of-week analysis | Full pattern analysis feeding into Sunday self-improvement |
 | 20:00 (Sun) | Self-improvement | Reviews performance + accumulated insights, proposes prompt changes via PR |
@@ -113,21 +143,28 @@ src/
 ### Decision Flow
 
 ```
-Market Data + Research + Learning Brief
-              |
-    Trading Analyst (Claude)
-              |
-     Proposes: BUY/SELL/HOLD
-              |
-       Risk Manager
-    (validates against limits)
-              |
-     Risk Reviewer (Claude)
-    (independent second opinion)
-              |
-        Order Execution
-              |
-     Trade Alert Email
+Cron Tick (every 20 min)
+         |
+  Code Pre-Filter (FREE)
+  positions? orders? price moves? research signals?
+         |
+    [nothing changed] → skip
+    [something to check] ↓
+         |
+  Haiku Quick Scan (~$0.02)
+  "Does this need full analysis?"
+         |
+    [no] → log and skip
+    [yes] ↓
+         |
+  Sonnet Trading Analyst (~$1.70)
+  Full agentic loop with tool use
+         |
+     Proposes: BUY/SELL/HOLD/CANCEL
+         |
+    Risk Manager (code validation)
+         |
+     Order Execution (IBKR)
 ```
 
 ### Learning Pipeline

@@ -24,6 +24,69 @@ export interface AgentResponse {
 	tokensUsed: { input: number; output: number };
 }
 
+export interface QuickScanResult {
+	escalate: boolean;
+	reason: string;
+}
+
+const QUICK_SCAN_SYSTEM = `You are a trading desk assistant performing a quick market scan. You receive a summary of current portfolio state, quotes, and research. Your ONLY job is to decide if a full trading analysis is needed right now.
+
+Respond with JSON only: {"escalate": true/false, "reason": "brief explanation"}
+
+Escalate (true) when:
+- A position is near its stop loss or take-profit target
+- A stock has a BUY or SELL research signal with high confidence (>=0.7)
+- A significant price move (>2%) creates a new entry/exit opportunity
+- A pending order might fill imminently
+- Market conditions have materially changed
+
+Do NOT escalate when:
+- All research shows HOLD/WATCH with no strong signals
+- Positions are within normal ranges
+- No pending orders exist
+- Nothing has meaningfully changed since last check`;
+
+/** Tier 2: Single Haiku call to decide if full Sonnet analysis is needed */
+export async function runQuickScan(context: string): Promise<QuickScanResult> {
+	const client = getClient();
+	const config = getConfig();
+
+	try {
+		const response = await client.messages.create({
+			model: config.CLAUDE_MODEL_FAST,
+			max_tokens: 256,
+			system: QUICK_SCAN_SYSTEM,
+			messages: [{ role: "user", content: context }],
+		});
+
+		await recordUsage(
+			"quick_scan",
+			response.usage.input_tokens,
+			response.usage.output_tokens,
+			response.usage.cache_creation_input_tokens ?? undefined,
+			response.usage.cache_read_input_tokens ?? undefined,
+		);
+
+		const text = response.content
+			.filter((b): b is Anthropic.TextBlock => b.type === "text")
+			.map((b) => b.text)
+			.join("");
+
+		const jsonMatch = text.match(/\{[\s\S]*\}/);
+		if (!jsonMatch) {
+			log.warn("Quick scan returned no JSON, escalating by default");
+			return { escalate: true, reason: "Failed to parse quick scan response" };
+		}
+
+		const result = JSON.parse(jsonMatch[0]) as QuickScanResult;
+		log.info({ escalate: result.escalate, reason: result.reason }, "Quick scan complete");
+		return result;
+	} catch (error) {
+		log.error({ error }, "Quick scan failed, escalating by default");
+		return { escalate: true, reason: `Quick scan error: ${error}` };
+	}
+}
+
 /** Run the trading analyst agent with tool use */
 export async function runTradingAnalyst(
 	userMessage: string,
