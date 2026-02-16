@@ -3,7 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { getAccountSummary, getPositions } from "../broker/account.ts";
 import { searchContracts } from "../broker/contracts.ts";
 import { getHistoricalBars, getQuote, getQuotes } from "../broker/market-data.ts";
-import { placeTrade, type TradeRequest } from "../broker/orders.ts";
+import { cancelOrder, placeTrade, type TradeRequest } from "../broker/orders.ts";
 import { getDb } from "../db/client.ts";
 import { research, trades, watchlist } from "../db/schema.ts";
 import { researchSymbol } from "../research/pipeline.ts";
@@ -148,6 +148,22 @@ export const toolDefinitions: Anthropic.Tool[] = [
 		},
 	},
 	{
+		name: "cancel_order",
+		description:
+			"Cancel a pending/submitted order. Use get_recent_trades first to find the trade ID. Only works on orders with status SUBMITTED or PENDING.",
+		input_schema: {
+			type: "object" as const,
+			properties: {
+				tradeId: {
+					type: "number",
+					description: "The trade ID from the trades table (not the IBKR order ID)",
+				},
+				reason: { type: "string", description: "Why this order is being cancelled" },
+			},
+			required: ["tradeId", "reason"],
+		},
+	},
+	{
 		name: "search_contracts",
 		description: "Search for LSE-listed stock contracts matching a pattern",
 		input_schema: {
@@ -267,6 +283,35 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				};
 				const result = await placeTrade(tradeReq);
 				return JSON.stringify(result);
+			}
+			case "cancel_order": {
+				const tradeId = input.tradeId as number;
+				const reason = input.reason as string;
+				const db = getDb();
+				const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+				if (!trade) {
+					return JSON.stringify({ error: `Trade ${tradeId} not found` });
+				}
+				if (trade.status !== "SUBMITTED" && trade.status !== "PENDING") {
+					return JSON.stringify({
+						error: `Cannot cancel trade ${tradeId} — status is ${trade.status}`,
+					});
+				}
+				if (!trade.ibOrderId) {
+					return JSON.stringify({ error: `Trade ${tradeId} has no IBKR order ID` });
+				}
+				await cancelOrder(trade.ibOrderId);
+				await db
+					.update(trades)
+					.set({ status: "CANCELLED", updatedAt: new Date().toISOString() })
+					.where(eq(trades.id, tradeId));
+				log.info({ tradeId, ibOrderId: trade.ibOrderId, reason }, "Order cancelled by agent");
+				return JSON.stringify({
+					cancelled: true,
+					tradeId,
+					symbol: trade.symbol,
+					reason,
+				});
 			}
 			case "search_contracts": {
 				const results = await searchContracts(input.pattern as string);

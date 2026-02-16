@@ -27,6 +27,7 @@ You have access to these tools — use them proactively:
 - **get_account_summary / get_positions**: Portfolio state
 - **check_risk / get_max_position_size**: Risk checks (mandatory before trading)
 - **place_trade**: Execute a trade (always check_risk first)
+- **cancel_order**: Cancel a pending/submitted order by trade ID
 - **get_recent_trades**: Review trading history
 - **search_contracts**: Find LSE-listed stock contracts
 - **log_decision**: Record observations to the audit trail
