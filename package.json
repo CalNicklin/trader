@@ -14,7 +14,7 @@
     "test": "bun test --preload ./tests/preload.ts",
     "db:pull": "ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine cat /data/trader.db' > ./data/trader.db && echo 'DB pulled to ./data/trader.db'",
     "db:studio": "bun run db:pull && bunx drizzle-kit studio",
-    "db:studio:live": "ssh -L 4983:127.0.0.1:4983 deploy@46.225.127.44 'docker compose -f ~/trader/docker/docker-compose.yml --profile studio up --build studio'"
+    "db:studio:live": "echo 'Open https://local.drizzle.studio?host=localhost&port=4983' && ssh -L 4983:127.0.0.1:4983 deploy@46.225.127.44 'docker compose -f /home/deploy/trader/docker/docker-compose.yml --profile studio up --build studio'"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.15",
