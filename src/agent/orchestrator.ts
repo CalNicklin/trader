@@ -121,6 +121,10 @@ export type OrchestratorState =
 let currentState: OrchestratorState = "idle";
 let tradingPaused = false;
 
+/** Inter-tick memory: day plan and last agent response */
+let currentDayPlan: string | null = null;
+let lastAgentResponse: string | null = null;
+
 export function getState(): OrchestratorState {
 	return currentState;
 }
@@ -227,6 +231,7 @@ ${learningBrief ? `\n${learningBrief}` : ""}
 `;
 
 		const response = await runTradingAnalyst(`${DAY_PLAN_PROMPT}\n\n${context}`);
+		currentDayPlan = response.text;
 		log.info({ plan: response.text.substring(0, 200) }, "Day plan generated");
 	} catch (error) {
 		log.error({ error }, "Pre-market phase failed");
@@ -417,13 +422,59 @@ Watchlist top scores: ${watchlistItems
 		log.info({ reason: scan.reason }, "Escalating to full Sonnet analysis");
 
 		const recentContext = await buildRecentContext();
+
+		// Build enrichment context (day plan, last response, data completeness, portfolio composition)
+		const enrichments: string[] = [];
+
+		if (currentDayPlan) {
+			enrichments.push(`Today's plan: ${currentDayPlan.substring(0, 500)}`);
+		}
+		if (lastAgentResponse) {
+			enrichments.push(`Your last assessment: ${lastAgentResponse.substring(0, 800)}`);
+		}
+
+		// Data completeness: how many quotes succeeded vs failed
+		const requestedSymbols = watchlistItems.map((w) => w.symbol);
+		const gotQuotes = requestedSymbols.filter((s) => preFilter.quotes.has(s));
+		const missingQuotes = requestedSymbols.filter((s) => !preFilter.quotes.has(s));
+		if (missingQuotes.length > 0) {
+			enrichments.push(
+				`Data completeness: ${gotQuotes.length}/${requestedSymbols.length} quotes. Missing: ${missingQuotes.join(", ")}`,
+			);
+		}
+
+		// Portfolio composition: sector breakdown
+		if (positionRows.length > 0) {
+			const watchlistSectors = await db
+				.select({ symbol: watchlist.symbol, sector: watchlist.sector })
+				.from(watchlist);
+			const sectorLookup = new Map(watchlistSectors.map((w) => [w.symbol, w.sector]));
+
+			const sectorTotals = new Map<string, number>();
+			for (const pos of positionRows) {
+				const mv = pos.marketValue ?? pos.avgCost * pos.quantity;
+				const sec = sectorLookup.get(pos.symbol) ?? "Unknown";
+				sectorTotals.set(sec, (sectorTotals.get(sec) ?? 0) + mv);
+			}
+
+			const account = await getAccountSummary();
+			const cashPct = ((account.totalCashValue / account.netLiquidation) * 100).toFixed(0);
+			const sectorBreakdown = [...sectorTotals.entries()]
+				.sort((a, b) => b[1] - a[1])
+				.map(([sec, val]) => `${sec} ${((val / account.netLiquidation) * 100).toFixed(0)}%`)
+				.join(", ");
+			enrichments.push(`Portfolio: ${sectorBreakdown}, Cash ${cashPct}%`);
+		}
+
+		const enrichmentBlock = enrichments.length > 0 ? `\n${enrichments.join("\n")}` : "";
+
 		let fullContext: string;
 
 		if (positionRows.length === 0) {
 			fullContext = `
 Watchlist quotes: ${JSON.stringify(Object.fromEntries(preFilter.quotes))}
 Watchlist data: ${JSON.stringify(watchlistItems)}
-${recentContext ? `\n${recentContext}` : ""}
+${recentContext ? `\n${recentContext}` : ""}${enrichmentBlock}
 Escalation reason: ${scan.reason}
 `;
 		} else {
@@ -438,12 +489,13 @@ Positions with current quotes: ${JSON.stringify(
 					ask: preFilter.quotes.get(p.symbol)?.ask,
 				})),
 			)}
-${recentContext ? `\n${recentContext}` : ""}
+${recentContext ? `\n${recentContext}` : ""}${enrichmentBlock}
 Escalation reason: ${scan.reason}
 `;
 		}
 
-		await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${fullContext}`);
+		const agentResponse = await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${fullContext}`);
+		lastAgentResponse = agentResponse.text;
 	} catch (error) {
 		log.error({ error }, "Active trading tick failed");
 	}
@@ -468,6 +520,8 @@ async function onPostMarket(): Promise<void> {
 		await reconcilePositions();
 		await recordDailySnapshot();
 		clearIntentions();
+		currentDayPlan = null;
+		lastAgentResponse = null;
 
 		log.info("Post-market complete");
 	} catch (error) {
