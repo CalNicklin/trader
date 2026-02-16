@@ -1,5 +1,5 @@
-import { createChildLogger } from "../utils/logger.ts";
 import { type JobName, runJobs } from "../scheduler/jobs.ts";
+import { createChildLogger } from "../utils/logger.ts";
 
 const log = createChildLogger({ module: "admin" });
 
