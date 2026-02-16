@@ -36,14 +36,16 @@ docker compose -f docker/docker-compose.yml down && docker compose -f docker/doc
 
 ## 2. Database Queries (SQLite)
 
-The database is inside the Docker volume. Query it with:
+The database is inside a Docker volume. The trader container does **not** have `sqlite3` installed.
+
+**Browse visually (Drizzle Studio):**
 ```bash
-docker compose -f docker/docker-compose.yml exec trader sh -c "bunx drizzle-kit studio"
+bun run db:studio   # pulls DB locally, opens https://local.drizzle.studio
 ```
 
-Or directly with SQLite:
+**One-off SQL query via SSH:**
 ```bash
-docker compose -f docker/docker-compose.yml exec trader sh -c "sqlite3 /app/data/trader.db"
+ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh -c "apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/trader.db \"<SQL>\""'
 ```
 
 ### Useful queries

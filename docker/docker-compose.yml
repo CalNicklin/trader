@@ -51,6 +51,16 @@ services:
     volumes:
       - trader-data:/app/data
 
+  studio:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.studio
+    profiles: ["studio"]
+    volumes:
+      - trader-data:/app/data:ro
+    ports:
+      - "127.0.0.1:4983:4983"
+
 volumes:
   ib-gateway-data:
   trader-data:
