@@ -21,6 +21,16 @@ Automated trading agent for IBKR UK Stocks & Shares ISA.
 - `bun run db:migrate` - Run migrations
 - `bun test` - Run tests
 
+## Deployment
+- **Server**: `ssh deploy@46.225.127.44`, project at `~/trader`
+- **Runtime**: Docker Compose (`docker/docker-compose.yml`) — two containers: `ib-gateway` (gnzsnz/ib-gateway) + `trader`
+- **DB in container**: `/app/data/trader.db` (persisted via `trader-data` volume)
+- **IB Gateway**: cold restart at 05:00, VNC on port 5900
+- **Logs**: `docker compose -f docker/docker-compose.yml logs -f trader --tail 50`
+- **DB query**: `docker compose -f docker/docker-compose.yml exec trader sh -c "sqlite3 /app/data/trader.db '<SQL>'"`
+- **Restart**: `docker compose -f docker/docker-compose.yml restart trader`
+- See `docs/monitoring.md` for full SSH cheat sheet and useful queries
+
 ## Conventions
 - Bun auto-loads `.env` files - no dotenv needed
 - Use `Bun.file` over `node:fs` where possible
