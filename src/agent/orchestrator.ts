@@ -569,8 +569,21 @@ async function reconcilePositions(): Promise<void> {
 	log.info({ broker: brokerPositions.length, db: dbPositions.length }, "Positions reconciled");
 }
 
-/** Record end-of-day portfolio snapshot */
+/** Record end-of-day portfolio snapshot (retries up to 3 times) */
 async function recordDailySnapshot(): Promise<void> {
+	for (let attempt = 1; attempt <= 3; attempt++) {
+		try {
+			await recordDailySnapshotInner();
+			return;
+		} catch (error) {
+			log.warn({ attempt, error }, "Daily snapshot failed, retrying...");
+			if (attempt < 3) await Bun.sleep(30_000);
+		}
+	}
+	log.error("Daily snapshot failed after 3 attempts — carrying forward previous");
+}
+
+async function recordDailySnapshotInner(): Promise<void> {
 	const db = getDb();
 	const account = await getAccountSummary();
 	const today = new Date().toISOString().split("T")[0]!;

@@ -20,11 +20,16 @@ function estimateCost(
 	cacheReadTokens?: number,
 ): number {
 	const p = OPUS_JOBS.has(job) ? PRICING.opus : PRICING.sonnet;
+	// Cache tokens are already counted in inputTokens — subtract them to avoid double-counting,
+	// then add back at their discounted rates
+	const cacheWrite = cacheCreationTokens ?? 0;
+	const cacheRead = cacheReadTokens ?? 0;
+	const normalInput = inputTokens - cacheWrite - cacheRead;
 	return (
-		(inputTokens * p.input +
+		(normalInput * p.input +
 			outputTokens * p.output +
-			(cacheCreationTokens ?? 0) * p.cacheWrite +
-			(cacheReadTokens ?? 0) * p.cacheRead) /
+			cacheWrite * p.cacheWrite +
+			cacheRead * p.cacheRead) /
 		1_000_000
 	);
 }

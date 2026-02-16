@@ -1,5 +1,6 @@
 import { tick } from "../agent/orchestrator.ts";
 import { isConnected } from "../broker/connection.ts";
+import { sendEmail } from "../reporting/email.ts";
 import { createChildLogger } from "../utils/logger.ts";
 
 const log = createChildLogger({ module: "scheduler-jobs" });
@@ -15,7 +16,8 @@ export type JobName =
 	| "self_improvement"
 	| "trade_review"
 	| "mid_week_analysis"
-	| "end_of_week_analysis";
+	| "end_of_week_analysis"
+	| "heartbeat";
 
 const BROKER_JOBS: ReadonlySet<JobName> = new Set([
 	"orchestrator_tick",
@@ -90,6 +92,16 @@ export async function runJobs(name: JobName): Promise<void> {
 			case "end_of_week_analysis": {
 				const { runPatternAnalysis } = await import("../learning/pattern-analyzer.ts");
 				await runPatternAnalysis("end_of_week");
+				break;
+			}
+
+			case "heartbeat": {
+				const uptimeHrs = (process.uptime() / 3600).toFixed(1);
+				const hostname = require("node:os").hostname();
+				await sendEmail({
+					subject: `Heartbeat: Trader Agent alive — uptime ${uptimeHrs}h`,
+					html: `<p>Trader Agent is running.</p><p>Hostname: ${hostname}<br>Uptime: ${uptimeHrs} hours<br>Time: ${new Date().toISOString()}</p>`,
+				});
 				break;
 			}
 		}

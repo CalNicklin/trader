@@ -1,6 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "../db/client.ts";
-import { research, watchlist } from "../db/schema.ts";
+import { positions, research, watchlist } from "../db/schema.ts";
 import { createChildLogger } from "../utils/logger.ts";
 
 const log = createChildLogger({ module: "research-watchlist" });
@@ -110,19 +110,68 @@ export async function getActiveWatchlist(): Promise<WatchlistEntry[]> {
 	}));
 }
 
-/** Get symbols that need research (not researched in 24h) */
+/** Decay scores for stale watchlist entries — call at start of research pipeline */
+export async function decayScores(): Promise<void> {
+	const db = getDb();
+	const items = await db.select().from(watchlist).where(eq(watchlist.active, true));
+
+	const now = Date.now();
+	let decayed = 0;
+	let deactivated = 0;
+
+	for (const item of items) {
+		if (!item.lastResearchedAt) continue;
+		const daysSinceResearch =
+			(now - new Date(item.lastResearchedAt).getTime()) / (1000 * 60 * 60 * 24);
+		const decayPoints = Math.floor(daysSinceResearch / 7) * 5;
+		if (decayPoints <= 0) continue;
+
+		const newScore = Math.max(0, (item.score ?? 0) - decayPoints);
+
+		if (newScore < 10) {
+			await db
+				.update(watchlist)
+				.set({ active: false, score: newScore })
+				.where(eq(watchlist.id, item.id));
+			deactivated++;
+		} else {
+			await db.update(watchlist).set({ score: newScore }).where(eq(watchlist.id, item.id));
+			decayed++;
+		}
+	}
+
+	if (decayed > 0 || deactivated > 0) {
+		log.info({ decayed, deactivated }, "Watchlist score decay applied");
+	}
+}
+
+/** Get symbols that need research (not researched in 24h), prioritized */
 export async function getStaleSymbols(): Promise<string[]> {
 	const db = getDb();
 
 	const items = await db
-		.select({ symbol: watchlist.symbol, lastResearchedAt: watchlist.lastResearchedAt })
+		.select({
+			symbol: watchlist.symbol,
+			score: watchlist.score,
+			lastResearchedAt: watchlist.lastResearchedAt,
+		})
 		.from(watchlist)
-		.where(eq(watchlist.active, true))
-		.orderBy(watchlist.lastResearchedAt);
+		.where(eq(watchlist.active, true));
 
 	const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+	const stale = items.filter((i) => !i.lastResearchedAt || i.lastResearchedAt < oneDayAgo);
 
-	return items
-		.filter((i) => !i.lastResearchedAt || i.lastResearchedAt < oneDayAgo)
-		.map((i) => i.symbol);
+	// Prioritize: held positions first, then by score desc, then stalest first
+	const heldPositions = await db.select({ symbol: positions.symbol }).from(positions);
+	const heldSet = new Set(heldPositions.map((p) => p.symbol));
+
+	stale.sort((a, b) => {
+		const aHeld = heldSet.has(a.symbol) ? 0 : 1;
+		const bHeld = heldSet.has(b.symbol) ? 0 : 1;
+		if (aHeld !== bHeld) return aHeld - bHeld;
+		if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
+		return (a.lastResearchedAt ?? "").localeCompare(b.lastResearchedAt ?? "");
+	});
+
+	return stale.map((i) => i.symbol);
 }

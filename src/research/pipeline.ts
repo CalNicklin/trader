@@ -11,7 +11,13 @@ import { analyzeStock } from "./analyzer.ts";
 import { getFMPProfile, screenLSEStocks } from "./sources/fmp.ts";
 import { fetchNews, filterNewsForSymbols, type NewsItem } from "./sources/news-scraper.ts";
 import { getYahooFundamentals, getYahooQuote } from "./sources/yahoo-finance.ts";
-import { addToWatchlist, getActiveWatchlist, getStaleSymbols, updateScore } from "./watchlist.ts";
+import {
+	addToWatchlist,
+	decayScores,
+	getActiveWatchlist,
+	getStaleSymbols,
+	updateScore,
+} from "./watchlist.ts";
 
 const log = createChildLogger({ module: "research-pipeline" });
 
@@ -20,6 +26,9 @@ export async function runResearchPipeline(): Promise<void> {
 	log.info("Research pipeline starting");
 
 	try {
+		// Stage 0: Decay stale watchlist scores
+		await decayScores();
+
 		// Stage 1: Universe screening - discover new candidates
 		await discoverNewStocks();
 
@@ -30,7 +39,7 @@ export async function runResearchPipeline(): Promise<void> {
 			activeWatchlist.filter((w) => w.name).map((w) => [w.symbol, w.name!]),
 		);
 		const news = await fetchNews(5);
-		const symbolNews = filterNewsForSymbols(news, symbols, watchlistNames);
+		const symbolNews = await filterNewsForSymbols(news, symbols, watchlistNames);
 
 		// Stage 2b: News-driven discovery — find new stocks mentioned in unmatched articles
 		await discoverFromNews(news, symbolNews, symbols);
@@ -203,12 +212,16 @@ export async function researchSymbol(
 		historicalBars,
 	});
 
+	// Compute data quality level
+	const dataQuality =
+		quote && fundamentals ? "full" : quote || fundamentals ? "partial" : "minimal";
+
 	// Store research results
 	const db = getDb();
 	await db.insert(research).values({
 		symbol,
 		source: "pipeline",
-		rawData: JSON.stringify({ quote, fundamentals, newsCount: newsItems.length }),
+		rawData: JSON.stringify({ quote, fundamentals, newsCount: newsItems.length, dataQuality }),
 		sentiment: analysis.sentiment,
 		bullCase: analysis.bullCase,
 		bearCase: analysis.bearCase,

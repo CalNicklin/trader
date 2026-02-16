@@ -45,8 +45,8 @@ export async function runPatternAnalysis(runType: "mid_week" | "end_of_week"): P
 		.where(gte(tradeReviews.createdAt, sevenDaysAgo))
 		.orderBy(desc(tradeReviews.createdAt));
 
-	if (reviews.length < 3) {
-		log.info({ count: reviews.length }, "Not enough trade reviews for pattern analysis");
+	if (reviews.length < 1) {
+		log.info("No trade reviews for pattern analysis");
 		return;
 	}
 

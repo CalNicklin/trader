@@ -26,28 +26,27 @@ export async function runTradeReview(): Promise<void> {
 	const todayStart = `${today}T00:00:00`;
 	const todayEnd = `${today}T23:59:59`;
 
-	// Get today's filled trades that have PnL
+	// Get today's filled trades (with PnL) and cancelled/expired orders
 	const filledTrades = await db
 		.select()
 		.from(trades)
-		.where(
-			and(
-				eq(trades.status, "FILLED"),
-				gte(trades.createdAt, todayStart),
-				lte(trades.createdAt, todayEnd),
-			),
-		);
+		.where(and(gte(trades.createdAt, todayStart), lte(trades.createdAt, todayEnd)));
 
-	const tradesWithPnl = filledTrades.filter((t) => t.pnl !== null);
+	const reviewable = filledTrades.filter(
+		(t) =>
+			(t.status === "FILLED" && t.pnl !== null) ||
+			t.status === "CANCELLED" ||
+			(t.status === "SUBMITTED" && !t.filledAt),
+	);
 
-	if (tradesWithPnl.length === 0) {
-		log.info("No trades with PnL to review today");
+	if (reviewable.length === 0) {
+		log.info("No trades to review today");
 		return;
 	}
 
 	const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
-	for (const trade of tradesWithPnl) {
+	for (const trade of reviewable) {
 		// Skip if already reviewed
 		const existing = await db
 			.select()
@@ -81,15 +80,18 @@ export async function runTradeReview(): Promise<void> {
 				),
 			);
 
-		const prompt = `Review this trade:
+		const didExecute = trade.status === "FILLED";
+		const prompt = `Review this trade${!didExecute ? ` (did NOT execute — ${trade.status})` : ""}:
 
 Symbol: ${trade.symbol}
 Side: ${trade.side}
 Quantity: ${trade.quantity}
+Status: ${trade.status}
 Fill Price: £${trade.fillPrice?.toFixed(4) ?? "N/A"}
 PnL: £${trade.pnl?.toFixed(2) ?? "N/A"}
 Confidence at entry: ${trade.confidence ?? "N/A"}
 Reasoning at entry: ${trade.reasoning ?? "N/A"}
+${!didExecute ? "\nThis order was placed but never filled. Assess whether the limit price was reasonable and what should be learned." : ""}
 
 Research context:
 ${JSON.stringify(symbolResearch.map((r) => ({ sentiment: r.sentiment, action: r.suggestedAction, confidence: r.confidence, analysis: r.analysis })))}
@@ -152,5 +154,5 @@ Provide your review as JSON.`;
 		}
 	}
 
-	log.info({ reviewed: tradesWithPnl.length }, "Trade review complete");
+	log.info({ reviewed: reviewable.length }, "Trade review complete");
 }

@@ -1,6 +1,6 @@
-import { desc, gte } from "drizzle-orm";
+import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { getDb } from "../../db/client.ts";
-import { positions, trades } from "../../db/schema.ts";
+import { improvementProposals, positions, trades } from "../../db/schema.ts";
 import { createChildLogger } from "../../utils/logger.ts";
 import { getUsageSummary } from "../../utils/token-tracker.ts";
 import { sendEmail } from "../email.ts";
@@ -25,6 +25,18 @@ export async function sendDailySummary(): Promise<void> {
 	const weeklyUsage = await getUsageSummary(7);
 	const totalDailyTokens = dailyUsage.totalInputTokens + dailyUsage.totalOutputTokens;
 	const apiCostLine = `Today's API cost: $${dailyUsage.totalCostUsd.toFixed(2)} (${totalDailyTokens.toLocaleString()} tokens) | This week: $${weeklyUsage.totalCostUsd.toFixed(2)}`;
+
+	// Check for stale improvement PRs (>7 days old, still PR_CREATED)
+	const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+	const stalePrs = await db
+		.select()
+		.from(improvementProposals)
+		.where(
+			and(
+				eq(improvementProposals.status, "PR_CREATED"),
+				lte(improvementProposals.createdAt, sevenDaysAgo),
+			),
+		);
 
 	const pnlColor = metrics.dailyPnl >= 0 ? "#16a34a" : "#dc2626";
 	const pnlSign = metrics.dailyPnl >= 0 ? "+" : "";
@@ -126,6 +138,25 @@ export async function sendDailySummary(): Promise<void> {
       <span style="color: ${pnl >= 0 ? "#16a34a" : "#dc2626"};">${pnl >= 0 ? "+" : ""}&pound;${pnl.toFixed(2)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%)</span>
     </div>`;
 			})
+			.join("")}
+  </div>`
+			: ""
+	}
+
+  ${
+		stalePrs.length > 0
+			? `
+  <div style="background: #fef3c7; border-radius: 12px; padding: 24px; margin-bottom: 16px;">
+    <h2 style="margin: 0 0 16px 0; font-size: 16px;">Pending Improvements (${stalePrs.length})</h2>
+    <p style="color: #92400e; font-size: 13px;">These PRs have been open for 7+ days and need review:</p>
+    ${stalePrs
+			.map(
+				(pr) => `
+    <div style="border-bottom: 1px solid #fde68a; padding: 6px 0;">
+      <span style="font-weight: bold;">${pr.title}</span>
+      ${pr.prUrl ? `<br><a href="${pr.prUrl}" style="color: #1d4ed8; font-size: 13px;">${pr.prUrl}</a>` : ""}
+    </div>`,
+			)
 			.join("")}
   </div>`
 			: ""

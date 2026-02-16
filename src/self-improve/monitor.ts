@@ -7,13 +7,7 @@ import {
 } from "../agent/prompts/self-improvement.ts";
 import { getConfig } from "../config.ts";
 import { getDb } from "../db/client.ts";
-import {
-	dailySnapshots,
-	improvementProposals,
-	tradeReviews,
-	trades,
-	weeklyInsights,
-} from "../db/schema.ts";
+import { improvementProposals, tradeReviews, trades, weeklyInsights } from "../db/schema.ts";
 import { sendEmail } from "../reporting/email.ts";
 import { calculateMetrics } from "../reporting/metrics.ts";
 import { HARD_LIMITS } from "../risk/limits.ts";
@@ -203,21 +197,19 @@ function parseProposals(text: string): Proposal[] {
 	return proposals;
 }
 
+/** Wilson score lower bound — conservative estimate of true win rate */
+function wilsonLower(wins: number, total: number, z: number = 1.96): number {
+	if (total === 0) return 0;
+	const p = wins / total;
+	const denominator = 1 + (z * z) / total;
+	const centre = p + (z * z) / (2 * total);
+	const spread = z * Math.sqrt((p * (1 - p) + (z * z) / (4 * total)) / total);
+	return (centre - spread) / denominator;
+}
+
 /** Check if we should pause trading due to poor performance */
 async function checkPerformancePause(): Promise<boolean> {
 	const db = getDb();
-
-	// Get last N weeks of snapshots
-	const threeWeeksAgo = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000)
-		.toISOString()
-		.split("T")[0]!;
-	const snapshots = await db
-		.select()
-		.from(dailySnapshots)
-		.where(gte(dailySnapshots.date, threeWeeksAgo))
-		.orderBy(dailySnapshots.date);
-
-	if (snapshots.length < 10) return false; // Not enough data
 
 	// Calculate win rates for last 2 weeks
 	const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
@@ -225,17 +217,23 @@ async function checkPerformancePause(): Promise<boolean> {
 
 	const wins = recentTrades.filter((t) => t.pnl !== null && t.pnl > 0).length;
 	const total = recentTrades.filter((t) => t.pnl !== null).length;
-	const winRate = total > 0 ? wins / total : 1;
 
-	if (winRate < HARD_LIMITS.PAUSE_WIN_RATE_THRESHOLD && total >= 5) {
-		log.warn({ winRate, total }, "Win rate below threshold - pausing trading");
+	// Use Wilson score lower bound instead of raw win rate
+	const lowerBound = wilsonLower(wins, total);
+
+	if (lowerBound < HARD_LIMITS.PAUSE_WIN_RATE_THRESHOLD && total >= 5) {
+		const rawRate = total > 0 ? wins / total : 0;
+		log.warn(
+			{ rawWinRate: rawRate, wilsonLower: lowerBound, total },
+			"Wilson score below threshold - pausing trading",
+		);
 		setPaused(true);
 
 		await sendEmail({
 			subject: "ALERT: Trading Paused - Poor Performance",
 			html: `
 <h2>Trading has been automatically paused</h2>
-<p>Win rate over the last 2 weeks: <strong>${(winRate * 100).toFixed(1)}%</strong> (threshold: ${HARD_LIMITS.PAUSE_WIN_RATE_THRESHOLD * 100}%)</p>
+<p>Win rate: <strong>${(rawRate * 100).toFixed(1)}%</strong> (Wilson lower bound: ${(lowerBound * 100).toFixed(1)}%, threshold: ${HARD_LIMITS.PAUSE_WIN_RATE_THRESHOLD * 100}%)</p>
 <p>Total trades: ${total} | Wins: ${wins} | Losses: ${total - wins}</p>
 <p>Please review performance and manually restart when ready.</p>
 			`.trim(),

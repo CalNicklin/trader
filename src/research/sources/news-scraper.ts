@@ -1,4 +1,7 @@
+import { eq } from "drizzle-orm";
 import Parser from "rss-parser";
+import { getDb } from "../../db/client.ts";
+import { watchlist } from "../../db/schema.ts";
 import { createChildLogger } from "../../utils/logger.ts";
 import { RateLimiter } from "../../utils/rate-limiter.ts";
 
@@ -86,10 +89,10 @@ export async function fetchNews(maxItemsPerFeed: number = 10): Promise<NewsItem[
 }
 
 /**
- * Well-known LSE symbol-to-name mappings for news matching.
+ * Static fallback aliases for symbols where the DB name alone isn't sufficient.
  * Supplemented at runtime by watchlist names from the database.
  */
-const SYMBOL_NAMES: Record<string, string[]> = {
+const STATIC_ALIASES: Record<string, string[]> = {
 	SHEL: ["Shell"],
 	"BP.": ["BP"],
 	AZN: ["AstraZeneca"],
@@ -122,21 +125,53 @@ const SYMBOL_NAMES: Record<string, string[]> = {
 	CPG: ["Compass Group"],
 };
 
+/** Build a dynamic symbol-to-names map from DB + static aliases */
+async function buildNameMap(): Promise<Map<string, string[]>> {
+	const nameMap = new Map<string, string[]>();
+
+	// Load from DB
+	try {
+		const db = getDb();
+		const rows = await db
+			.select({ symbol: watchlist.symbol, name: watchlist.name })
+			.from(watchlist)
+			.where(eq(watchlist.active, true));
+
+		for (const row of rows) {
+			if (row.name) {
+				nameMap.set(row.symbol, [row.name]);
+			}
+		}
+	} catch {
+		log.debug("Could not load watchlist names — using static aliases only");
+	}
+
+	// Merge static aliases (may add additional names the DB doesn't have)
+	for (const [symbol, aliases] of Object.entries(STATIC_ALIASES)) {
+		const existing = nameMap.get(symbol) ?? [];
+		const merged = [...new Set([...existing, ...aliases])];
+		nameMap.set(symbol, merged);
+	}
+
+	return nameMap;
+}
+
 /** Filter news for mentions of specific symbols, matching both ticker and company name */
-export function filterNewsForSymbols(
+export async function filterNewsForSymbols(
 	news: NewsItem[],
 	symbols: string[],
 	watchlistNames?: Map<string, string>,
-): Map<string, NewsItem[]> {
+): Promise<Map<string, NewsItem[]>> {
 	const result = new Map<string, NewsItem[]>();
+	const nameMap = await buildNameMap();
 
 	for (const symbol of symbols) {
 		// Build search terms: ticker + known names + watchlist name
 		const searchTerms: string[] = [symbol.replace(".", "")]; // strip dots for matching
 		if (symbol.includes(".")) searchTerms.push(symbol); // also match with dot
 
-		const knownNames = SYMBOL_NAMES[symbol];
-		if (knownNames) searchTerms.push(...knownNames);
+		const names = nameMap.get(symbol);
+		if (names) searchTerms.push(...names);
 
 		const watchlistName = watchlistNames?.get(symbol);
 		if (watchlistName) searchTerms.push(watchlistName);

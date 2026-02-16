@@ -6,12 +6,21 @@ import { tradeReviews, weeklyInsights } from "../db/schema.ts";
 export async function buildLearningBrief(): Promise<string> {
 	const db = getDb();
 
-	// Latest weekly insights (up to 5)
+	// Latest weekly insights — prioritize by severity (critical > warning > info)
 	const insights = await db
 		.select()
 		.from(weeklyInsights)
 		.orderBy(desc(weeklyInsights.createdAt))
-		.limit(5);
+		.limit(15); // Fetch more, then sort by severity
+
+	const severityOrder = { critical: 0, warning: 1, info: 2 };
+	insights.sort(
+		(a, b) =>
+			(severityOrder[a.severity as keyof typeof severityOrder] ?? 2) -
+			(severityOrder[b.severity as keyof typeof severityOrder] ?? 2),
+	);
+	// Keep all critical, fill remaining from warning then info up to 5
+	const sortedInsights = insights.slice(0, 5);
 
 	// Last 5 trade reviews with lessons
 	const reviews = await db
@@ -20,13 +29,13 @@ export async function buildLearningBrief(): Promise<string> {
 		.orderBy(desc(tradeReviews.createdAt))
 		.limit(5);
 
-	if (insights.length === 0 && reviews.length === 0) return "";
+	if (sortedInsights.length === 0 && reviews.length === 0) return "";
 
 	const parts: string[] = ["## Learning Brief"];
 
-	if (insights.length > 0) {
+	if (sortedInsights.length > 0) {
 		parts.push("\n### Insights from recent analysis:");
-		for (const i of insights) {
+		for (const i of sortedInsights) {
 			const prefix =
 				i.severity === "critical" ? "[CRITICAL] " : i.severity === "warning" ? "[WARNING] " : "";
 			parts.push(`- ${prefix}${i.insight}`);
@@ -34,7 +43,7 @@ export async function buildLearningBrief(): Promise<string> {
 		}
 
 		// Extract confidence calibration one-liner if available
-		const calibration = insights.find((i) => i.category === "confidence_calibration");
+		const calibration = sortedInsights.find((i) => i.category === "confidence_calibration");
 		if (calibration) {
 			parts.push(`\nConfidence calibration: ${calibration.insight}`);
 		}
