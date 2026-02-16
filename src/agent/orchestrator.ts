@@ -189,18 +189,21 @@ async function shouldRunAnalysis(): Promise<PreFilterResult> {
 		lastQuotes.set(symbol, quote.last);
 	}
 
-	// Check for new research with BUY or SELL signals (last 24h)
+	// Check for new research with actionable signals (last 24h)
+	// BUY signals are always actionable; SELL only if we hold that stock (ISA = long-only, can't short)
 	const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 	const actionableResearch = await db
 		.select()
 		.from(research)
 		.where(gte(research.createdAt, oneDayAgo));
 
-	const buyOrSell = actionableResearch.filter(
-		(r) => r.suggestedAction === "BUY" || r.suggestedAction === "SELL",
+	const heldSymbols = new Set(positionRows.map((p) => p.symbol));
+	const actionable = actionableResearch.filter(
+		(r) =>
+			r.suggestedAction === "BUY" || (r.suggestedAction === "SELL" && heldSymbols.has(r.symbol)),
 	);
-	if (buyOrSell.length > 0) {
-		const actions = buyOrSell.map((r) => `${r.symbol}:${r.suggestedAction}`).join(", ");
+	if (actionable.length > 0) {
+		const actions = actionable.map((r) => `${r.symbol}:${r.suggestedAction}`).join(", ");
 		reasons.push(`Actionable research: ${actions}`);
 	}
 
