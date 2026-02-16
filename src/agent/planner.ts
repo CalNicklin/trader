@@ -4,7 +4,6 @@ import { getDb } from "../db/client.ts";
 import { agentLogs } from "../db/schema.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
-import { RISK_REVIEWER_SYSTEM } from "./prompts/risk-reviewer.ts";
 import { TRADING_ANALYST_SYSTEM } from "./prompts/trading-analyst.ts";
 import { executeTool, toolDefinitions } from "./tools.ts";
 
@@ -31,11 +30,6 @@ export async function runTradingAnalyst(
 	maxIterations: number = 10,
 ): Promise<AgentResponse> {
 	return runAgent(TRADING_ANALYST_SYSTEM, userMessage, toolDefinitions, maxIterations);
-}
-
-/** Run the risk reviewer (no tools - just analysis) */
-export async function runRiskReviewer(tradeProposal: string): Promise<AgentResponse> {
-	return runAgent(RISK_REVIEWER_SYSTEM, tradeProposal, [], 1);
 }
 
 /** Core agent loop with tool use */

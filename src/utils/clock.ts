@@ -28,33 +28,28 @@ export function isMarketOpen(date?: Date): boolean {
 	return totalMinutes >= MARKET_OPEN_MINUTES && totalMinutes < MARKET_CLOSE_MINUTES;
 }
 
-export function isPreMarket(date?: Date): boolean {
+function isPreMarket(date?: Date): boolean {
 	const { day, totalMinutes } = getLondonDate(date);
 	if (day === 0 || day === 6) return false;
 	return totalMinutes >= 7 * 60 + 30 && totalMinutes < MARKET_OPEN_MINUTES; // 07:30 - 08:00
 }
 
-export function isPostMarket(date?: Date): boolean {
+function isPostMarket(date?: Date): boolean {
 	const { day, totalMinutes } = getLondonDate(date);
 	if (day === 0 || day === 6) return false;
 	return totalMinutes >= MARKET_CLOSE_MINUTES && totalMinutes < 17 * 60; // 16:30 - 17:00
 }
 
-export function isResearchWindow(date?: Date): boolean {
+function isResearchWindow(date?: Date): boolean {
 	const { day, totalMinutes } = getLondonDate(date);
 	if (day === 0 || day === 6) return false;
 	return totalMinutes >= 18 * 60 && totalMinutes < 22 * 60; // 18:00 - 22:00
 }
 
-export function isWindDown(date?: Date): boolean {
+function isWindDown(date?: Date): boolean {
 	const { day, totalMinutes } = getLondonDate(date);
 	if (day === 0 || day === 6) return false;
 	return totalMinutes >= 16 * 60 + 25 && totalMinutes < MARKET_CLOSE_MINUTES; // 16:25 - 16:30
-}
-
-export function isWeekday(date?: Date): boolean {
-	const { day } = getLondonDate(date);
-	return day >= 1 && day <= 5;
 }
 
 export function getMarketPhase(
@@ -66,13 +61,4 @@ export function getMarketPhase(
 	if (isPostMarket(date)) return "post-market";
 	if (isResearchWindow(date)) return "research";
 	return "closed";
-}
-
-export function minutesUntilMarketOpen(date?: Date): number {
-	const { day, totalMinutes } = getLondonDate(date);
-	if (day === 0) return 1 * 24 * 60 + MARKET_OPEN_MINUTES - totalMinutes;
-	if (day === 6) return 2 * 24 * 60 + MARKET_OPEN_MINUTES - totalMinutes;
-	if (totalMinutes < MARKET_OPEN_MINUTES) return MARKET_OPEN_MINUTES - totalMinutes;
-	// After market close, next day
-	return 24 * 60 - totalMinutes + MARKET_OPEN_MINUTES;
 }

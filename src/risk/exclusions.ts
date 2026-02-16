@@ -21,11 +21,6 @@ async function loadExclusions(): Promise<ExclusionEntry[]> {
 	return _cache;
 }
 
-/** Clear the cache (call after modifying exclusions) */
-export function clearExclusionsCache(): void {
-	_cache = null;
-}
-
 /** Check if a symbol is excluded */
 export async function isSymbolExcluded(
 	symbol: string,
@@ -54,22 +49,4 @@ export async function isSectorExcluded(
 		return { excluded: true, reason: match.reason };
 	}
 	return { excluded: false };
-}
-
-/** Check if a SIC code is excluded */
-export async function isSicCodeExcluded(
-	sicCode: string,
-): Promise<{ excluded: boolean; reason?: string }> {
-	const entries = await loadExclusions();
-	const match = entries.find((e) => e.type === "SIC_CODE" && e.value === sicCode);
-	if (match) {
-		log.warn({ sicCode, reason: match.reason }, "SIC code is excluded");
-		return { excluded: true, reason: match.reason };
-	}
-	return { excluded: false };
-}
-
-/** Get all exclusions */
-export async function getAllExclusions(): Promise<ExclusionEntry[]> {
-	return loadExclusions();
 }
