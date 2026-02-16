@@ -9,8 +9,8 @@ export const HARD_LIMITS = {
 
 	/** Maximum single position as % of portfolio */
 	MAX_POSITION_PCT: 5,
-	/** Hard cap on single position in GBP (early stage) */
-	MAX_POSITION_GBP: 500,
+	/** Hard cap on single position in GBP */
+	MAX_POSITION_GBP: 50_000,
 	/** Minimum cash reserve as % of portfolio */
 	MIN_CASH_RESERVE_PCT: 20,
 

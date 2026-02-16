@@ -31,7 +31,7 @@ export async function seedDatabase() {
 	// Seed default risk config
 	const riskConfigData = [
 		{ key: "max_position_pct", value: 5, description: "Max single position as % of portfolio" },
-		{ key: "max_position_gbp", value: 500, description: "Hard cap on single position in GBP" },
+		{ key: "max_position_gbp", value: 50000, description: "Hard cap on single position in GBP" },
 		{
 			key: "min_cash_reserve_pct",
 			value: 20,

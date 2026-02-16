@@ -4,7 +4,7 @@ import { calculateStopLoss } from "../src/risk/manager.ts";
 
 test("hard limits are correctly defined", () => {
 	expect(HARD_LIMITS.MAX_POSITION_PCT).toBe(5);
-	expect(HARD_LIMITS.MAX_POSITION_GBP).toBe(500);
+	expect(HARD_LIMITS.MAX_POSITION_GBP).toBe(50_000);
 	expect(HARD_LIMITS.MIN_CASH_RESERVE_PCT).toBe(20);
 	expect(HARD_LIMITS.PER_TRADE_STOP_LOSS_PCT).toBe(3);
 	expect(HARD_LIMITS.DAILY_LOSS_LIMIT_PCT).toBe(2);
