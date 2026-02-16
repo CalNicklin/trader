@@ -110,7 +110,7 @@ ${ALLOWED_FILES.join("\n")}
 		const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
 		const response = await client.messages.create({
-			model: config.CLAUDE_MODEL_STANDARD,
+			model: config.CLAUDE_MODEL,
 			max_tokens: 4096,
 			system: [
 				{ type: "text", text: SELF_IMPROVEMENT_SYSTEM, cache_control: { type: "ephemeral" } },
