@@ -9,6 +9,7 @@ import { research, trades, watchlist } from "../db/schema.ts";
 import { researchSymbol } from "../research/pipeline.ts";
 import { updateScore } from "../research/watchlist.ts";
 import { checkTradeRisk, getMaxPositionSize } from "../risk/manager.ts";
+import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
 
 const log = createChildLogger({ module: "agent-tools" });
@@ -272,14 +273,61 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				return JSON.stringify(result);
 			}
 			case "place_trade": {
+				const side = input.side as "BUY" | "SELL";
+				const confidence = input.confidence as number;
+				const symbol = input.symbol as string;
+				const quantity = input.quantity as number;
+				const limitPrice = input.limitPrice as number | undefined;
+				const orderType = input.orderType as "LIMIT" | "MARKET";
+				const estimatedPrice = limitPrice ?? 0;
+
+				// Gate 1: Wind-down / post-market rejection for BUY orders
+				if (side === "BUY") {
+					const phase = getMarketPhase();
+					if (phase === "wind-down" || phase === "post-market" || phase === "closed") {
+						log.warn({ symbol, phase }, "BUY order rejected — market phase");
+						return JSON.stringify({
+							error: `BUY orders not allowed during ${phase} phase`,
+							rejected: true,
+						});
+					}
+				}
+
+				// Gate 2: Confidence threshold
+				if (confidence < 0.7) {
+					log.warn({ symbol, confidence }, "Trade rejected — confidence below 0.7");
+					return JSON.stringify({
+						error: `Confidence ${confidence} is below minimum threshold of 0.7`,
+						rejected: true,
+					});
+				}
+
+				// Gate 3: Mandatory risk check
+				if (side === "BUY") {
+					const riskResult = await checkTradeRisk({
+						symbol,
+						side,
+						quantity,
+						estimatedPrice,
+					});
+					if (!riskResult.approved) {
+						log.warn({ symbol, reasons: riskResult.reasons }, "Trade rejected by risk gate");
+						return JSON.stringify({
+							error: "Trade rejected by risk manager",
+							reasons: riskResult.reasons,
+							rejected: true,
+						});
+					}
+				}
+
 				const tradeReq: TradeRequest = {
-					symbol: input.symbol as string,
-					side: input.side as "BUY" | "SELL",
-					quantity: input.quantity as number,
-					orderType: input.orderType as "LIMIT" | "MARKET",
-					limitPrice: input.limitPrice as number | undefined,
+					symbol,
+					side,
+					quantity,
+					orderType,
+					limitPrice,
 					reasoning: input.reasoning as string,
-					confidence: input.confidence as number,
+					confidence,
 				};
 				const result = await placeTrade(tradeReq);
 				return JSON.stringify(result);
