@@ -16,7 +16,7 @@ services:
       EXISTING_SESSION_DETECTED_ACTION: "primaryoverride"
       TWS_COLD_RESTART: "05:00"
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 4004 || exit 1"]
+      test: ["CMD-SHELL", "echo > /dev/tcp/localhost/4004 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
