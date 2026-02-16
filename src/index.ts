@@ -2,6 +2,7 @@ import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { startAdminServer, stopAdminServer } from "./admin/server.ts";
 import { getAccountSummary, getPositions } from "./broker/account.ts";
 import { connect, disconnect } from "./broker/connection.ts";
+import { startGuardian, stopGuardian } from "./broker/guardian.ts";
 import { getConfig } from "./config.ts";
 import { closeDb, getDb } from "./db/client.ts";
 import { seedDatabase } from "./db/seed.ts";
@@ -47,16 +48,18 @@ async function boot() {
 		log.info("No open positions");
 	}
 
-	// Start the scheduler and admin server
+	// Start the scheduler, guardian, and admin server
 	startScheduler();
+	startGuardian();
 	startAdminServer();
-	log.info("Scheduler started - agent is running");
+	log.info("Scheduler and guardian started - agent is running");
 }
 
 // Graceful shutdown
 async function shutdown(signal: string) {
 	log.info({ signal }, "Shutting down...");
 	stopAdminServer();
+	stopGuardian();
 	stopScheduler();
 	await disconnect();
 	closeDb();

@@ -1,5 +1,6 @@
 import { desc, eq, gte } from "drizzle-orm";
 import { getAccountSummary, getPositions as getBrokerPositions } from "../broker/account.ts";
+import { drainAlerts } from "../broker/guardian.ts";
 import type { Quote } from "../broker/market-data.ts";
 import { getQuotes } from "../broker/market-data.ts";
 import { getDb } from "../db/client.ts";
@@ -186,6 +187,12 @@ async function shouldRunAnalysis(): Promise<MarketState> {
 			}
 		}
 		lastQuotes.set(symbol, quote.last);
+	}
+
+	// Check for guardian price alerts (>3% moves detected between ticks)
+	const alerts = drainAlerts();
+	for (const alert of alerts) {
+		reasons.push(`Guardian alert: ${alert.symbol} moved ${alert.movePct.toFixed(1)}%`);
 	}
 
 	// Check for new research with actionable signals (last 24h)
