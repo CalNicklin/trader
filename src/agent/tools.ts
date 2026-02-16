@@ -6,6 +6,8 @@ import { getHistoricalBars, getQuote, getQuotes } from "../broker/market-data.ts
 import { placeTrade, type TradeRequest } from "../broker/orders.ts";
 import { getDb } from "../db/client.ts";
 import { research, trades, watchlist } from "../db/schema.ts";
+import { researchSymbol } from "../research/pipeline.ts";
+import { updateScore } from "../research/watchlist.ts";
 import { checkTradeRisk, getMaxPositionSize } from "../risk/manager.ts";
 import { createChildLogger } from "../utils/logger.ts";
 
@@ -76,6 +78,18 @@ export const toolDefinitions: Anthropic.Tool[] = [
 			type: "object" as const,
 			properties: {
 				symbol: { type: "string", description: "Stock ticker symbol" },
+			},
+			required: ["symbol"],
+		},
+	},
+	{
+		name: "research_symbol",
+		description:
+			"Run fresh research on a symbol RIGHT NOW. Fetches latest quote, fundamentals, news, and historical data, then analyses with Claude. Use this BEFORE trading a symbol if existing research is stale (>24h old) or missing. Returns the new analysis.",
+		input_schema: {
+			type: "object" as const,
+			properties: {
+				symbol: { type: "string", description: "Stock ticker symbol to research" },
 			},
 			required: ["symbol"],
 		},
@@ -203,6 +217,20 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 					.orderBy(desc(research.createdAt))
 					.limit(5);
 				return JSON.stringify(items);
+			}
+			case "research_symbol": {
+				const symbol = (input.symbol as string).toUpperCase();
+				await researchSymbol(symbol, []);
+				await updateScore(symbol);
+				// Return the fresh analysis
+				const db = getDb();
+				const freshResearch = await db
+					.select()
+					.from(research)
+					.where(eq(research.symbol, symbol))
+					.orderBy(desc(research.createdAt))
+					.limit(1);
+				return JSON.stringify(freshResearch[0] ?? { error: "Research produced no results" });
 			}
 			case "get_recent_trades": {
 				const db = getDb();

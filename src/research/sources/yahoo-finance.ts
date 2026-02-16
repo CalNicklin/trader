@@ -95,16 +95,4 @@ export async function getYahooFundamentals(symbol: string): Promise<YahooFundame
 	}
 }
 
-/** Screen for active UK stocks using Yahoo Finance */
-export async function screenUKStocks(): Promise<string[]> {
-	try {
-		const result = await yf.search("LSE stocks", { quotesCount: 50 });
-		return (result.quotes ?? [])
-			.filter((q: Record<string, unknown>) => q.exchDisp === "London" || q.exchange === "LSE")
-			.map((q: Record<string, unknown>) => String(q.symbol ?? "").replace(".L", ""))
-			.filter(Boolean);
-	} catch (error) {
-		log.error({ error }, "UK stock screening failed");
-		return [];
-	}
-}
+/** @deprecated Use screenLSEStocks() from fmp.ts instead */

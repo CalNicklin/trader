@@ -1,13 +1,16 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
 import { getHistoricalBars } from "../broker/market-data.ts";
+import { getConfig } from "../config.ts";
 import { getDb } from "../db/client.ts";
 import { research, watchlist } from "../db/schema.ts";
 import { isSymbolExcluded } from "../risk/exclusions.ts";
 import { createChildLogger } from "../utils/logger.ts";
+import { recordUsage } from "../utils/token-tracker.ts";
 import { analyzeStock } from "./analyzer.ts";
-import { getFMPProfile } from "./sources/fmp.ts";
-import { fetchNews, filterNewsForSymbols } from "./sources/news-scraper.ts";
-import { getYahooFundamentals, getYahooQuote, screenUKStocks } from "./sources/yahoo-finance.ts";
+import { getFMPProfile, screenLSEStocks } from "./sources/fmp.ts";
+import { fetchNews, filterNewsForSymbols, type NewsItem } from "./sources/news-scraper.ts";
+import { getYahooFundamentals, getYahooQuote } from "./sources/yahoo-finance.ts";
 import { addToWatchlist, getActiveWatchlist, getStaleSymbols, updateScore } from "./watchlist.ts";
 
 const log = createChildLogger({ module: "research-pipeline" });
@@ -28,6 +31,9 @@ export async function runResearchPipeline(): Promise<void> {
 		);
 		const news = await fetchNews(5);
 		const symbolNews = filterNewsForSymbols(news, symbols, watchlistNames);
+
+		// Stage 2b: News-driven discovery — find new stocks mentioned in unmatched articles
+		await discoverFromNews(news, symbolNews, symbols);
 
 		// Stage 3: Deep research on stale/priority symbols
 		const staleSymbols = await getStaleSymbols();
@@ -53,30 +59,23 @@ export async function runResearchPipeline(): Promise<void> {
 	}
 }
 
-/** Discover new stocks to add to the watchlist */
+/** Discover new stocks to add to the watchlist via FMP screener */
 async function discoverNewStocks(): Promise<void> {
 	try {
-		const candidates = await screenUKStocks();
+		const candidates = await screenLSEStocks();
 		const currentWatchlist = await getActiveWatchlist();
 		const currentSymbols = new Set(currentWatchlist.map((w) => w.symbol));
 
 		let added = 0;
-		for (const symbol of candidates) {
-			if (currentSymbols.has(symbol)) continue;
+		for (const candidate of candidates) {
+			if (currentSymbols.has(candidate.symbol)) continue;
 
 			// Check exclusions
-			const exclusion = await isSymbolExcluded(symbol);
+			const exclusion = await isSymbolExcluded(candidate.symbol);
 			if (exclusion.excluded) continue;
 
-			// Try to get basic info
-			const profile = await getFMPProfile(symbol);
-			if (profile) {
-				await addToWatchlist(symbol, profile.companyName, profile.sector);
-				added++;
-			} else {
-				await addToWatchlist(symbol);
-				added++;
-			}
+			await addToWatchlist(candidate.symbol, candidate.name, candidate.sector);
+			added++;
 
 			if (added >= 5) break; // Max 5 new additions per session
 		}
@@ -87,8 +86,96 @@ async function discoverNewStocks(): Promise<void> {
 	}
 }
 
+/** Discover new stocks from unmatched news articles using Claude */
+async function discoverFromNews(
+	allNews: NewsItem[],
+	matchedNews: Map<string, NewsItem[]>,
+	existingSymbols: string[],
+): Promise<void> {
+	try {
+		// Collect articles that didn't match any existing watchlist symbol
+		const matchedArticles = new Set<string>();
+		for (const items of matchedNews.values()) {
+			for (const item of items) matchedArticles.add(item.link);
+		}
+		const unmatched = allNews.filter((n) => !matchedArticles.has(n.link));
+
+		if (unmatched.length === 0) {
+			log.debug("No unmatched news articles for discovery");
+			return;
+		}
+
+		// Batch headlines for a single Haiku call
+		const headlines = unmatched
+			.slice(0, 30)
+			.map((n) => `- ${n.title} (${n.source})`)
+			.join("\n");
+
+		const config = getConfig();
+		const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+
+		const response = await client.messages.create({
+			model: config.CLAUDE_MODEL_FAST,
+			max_tokens: 512,
+			messages: [
+				{
+					role: "user",
+					content: `Extract LSE-listed UK company tickers from these financial headlines. Only include companies clearly mentioned by name. Return a JSON array of objects with "symbol" (LSE ticker without .L suffix) and "name" (company name). Return [] if none found.
+
+Headlines:
+${headlines}`,
+				},
+			],
+		});
+
+		await recordUsage(
+			"news_discovery",
+			response.usage.input_tokens,
+			response.usage.output_tokens,
+			response.usage.cache_creation_input_tokens ?? undefined,
+			response.usage.cache_read_input_tokens ?? undefined,
+		);
+
+		const text = response.content
+			.filter((b): b is Anthropic.TextBlock => b.type === "text")
+			.map((b) => b.text)
+			.join("");
+
+		const jsonMatch = text.match(/\[[\s\S]*\]/);
+		if (!jsonMatch) return;
+
+		const discovered = JSON.parse(jsonMatch[0]) as Array<{ symbol: string; name: string }>;
+		const existingSet = new Set(existingSymbols);
+
+		let added = 0;
+		for (const stock of discovered) {
+			const symbol = stock.symbol.toUpperCase().replace(".L", "");
+			if (existingSet.has(symbol)) continue;
+
+			const exclusion = await isSymbolExcluded(symbol);
+			if (exclusion.excluded) continue;
+
+			// Verify it exists on LSE via FMP
+			const profile = await getFMPProfile(symbol);
+			if (profile) {
+				await addToWatchlist(symbol, profile.companyName, profile.sector);
+				added++;
+			}
+
+			if (added >= 3) break; // Max 3 news-driven additions per run
+		}
+
+		log.info(
+			{ unmatchedArticles: unmatched.length, discovered: discovered.length, added },
+			"News-driven discovery complete",
+		);
+	} catch (error) {
+		log.error({ error }, "News-driven discovery failed");
+	}
+}
+
 /** Deep research on a single symbol */
-async function researchSymbol(
+export async function researchSymbol(
 	symbol: string,
 	newsItems: Array<{ title: string; snippet: string }>,
 ): Promise<void> {

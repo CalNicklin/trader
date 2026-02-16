@@ -57,6 +57,67 @@ export async function getFMPProfile(symbol: string): Promise<FMPProfile | null> 
 	return result?.[0] ?? null;
 }
 
+interface FMPScreenerResult {
+	symbol: string;
+	companyName: string;
+	marketCap: number;
+	sector: string;
+	industry: string;
+	country: string;
+	price: number;
+	volume: number;
+	exchange: string;
+}
+
+/** Sector rotation schedule: different focus each weekday */
+const SECTOR_ROTATION: Record<number, { sector?: string; label: string }> = {
+	1: { sector: "Technology", label: "Technology" },
+	2: { sector: "Healthcare", label: "Healthcare" },
+	3: { label: "Small-caps (all sectors)" }, // No sector filter, small-cap focus
+	4: { sector: "Financial Services", label: "Financial Services" },
+	5: { sector: "Consumer Cyclical", label: "Consumer Cyclical" },
+};
+
+/** Screen LSE stocks using FMP company screener with rotating criteria */
+export async function screenLSEStocks(): Promise<
+	Array<{ symbol: string; name: string; sector: string }>
+> {
+	const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon...
+	const rotation = SECTOR_ROTATION[dayOfWeek] ?? { label: "all sectors" };
+
+	const params: Record<string, string> = {
+		exchange: "LSE",
+		country: "GB",
+		isActivelyTrading: "true",
+		limit: "50",
+	};
+
+	// Small-cap day: focus on smaller companies across all sectors
+	if (!rotation.sector) {
+		params.marketCapMoreThan = "50000000"; // >£50M
+		params.marketCapLessThan = "2000000000"; // <£2B
+		params.volumeMoreThan = "100000";
+	} else {
+		params.sector = rotation.sector;
+		params.marketCapMoreThan = "100000000"; // >£100M
+		params.volumeMoreThan = "50000";
+	}
+
+	log.info({ rotation: rotation.label, day: dayOfWeek }, "Screening LSE stocks");
+
+	const results = await fmpFetch<FMPScreenerResult[]>("/company-screener", params);
+	if (!results || results.length === 0) {
+		log.warn("FMP screener returned no results");
+		return [];
+	}
+
+	return results.map((r) => ({
+		symbol: r.symbol.replace(".L", ""),
+		name: r.companyName,
+		sector: r.sector,
+	}));
+}
+
 /** Get real-time quotes from FMP for multiple LSE symbols via /profile endpoint */
 export async function getFMPQuotes(symbols: string[]): Promise<Map<string, Quote>> {
 	const quotes = new Map<string, Quote>();
