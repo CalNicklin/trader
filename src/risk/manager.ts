@@ -1,7 +1,8 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getAccountSummary } from "../broker/account.ts";
 import { getDb } from "../db/client.ts";
-import { dailySnapshots, positions, trades } from "../db/schema.ts";
+import { dailySnapshots, positions, trades, watchlist } from "../db/schema.ts";
+import { getYahooQuote } from "../research/sources/yahoo-finance.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { isSectorExcluded, isSymbolExcluded } from "./exclusions.ts";
 import { HARD_LIMITS } from "./limits.ts";
@@ -84,6 +85,49 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 	const existingPosition = openPositions.find((p) => p.symbol === proposal.symbol);
 	if (!existingPosition && openPositions.length >= HARD_LIMITS.MAX_POSITIONS) {
 		reasons.push(`Max positions (${HARD_LIMITS.MAX_POSITIONS}) reached`);
+	}
+
+	// --- Sector concentration check ---
+	if (proposal.sector) {
+		const sectorRows = await db
+			.select({ symbol: positions.symbol, marketValue: positions.marketValue })
+			.from(positions);
+
+		// Look up sector for each position via watchlist
+		const watchlistRows = await db
+			.select({ symbol: watchlist.symbol, sector: watchlist.sector })
+			.from(watchlist);
+		const sectorMap = new Map(watchlistRows.map((w) => [w.symbol, w.sector]));
+
+		// Sum market value by sector
+		const sectorExposure = new Map<string, number>();
+		for (const pos of sectorRows) {
+			const sec = sectorMap.get(pos.symbol);
+			if (sec) {
+				sectorExposure.set(sec, (sectorExposure.get(sec) ?? 0) + (pos.marketValue ?? 0));
+			}
+		}
+
+		// Add proposed trade value to the target sector
+		const currentSectorValue = sectorExposure.get(proposal.sector) ?? 0;
+		const proposedSectorValue = currentSectorValue + tradeValue;
+		const sectorPct = (proposedSectorValue / account.netLiquidation) * 100;
+
+		if (sectorPct > HARD_LIMITS.MAX_SECTOR_EXPOSURE_PCT) {
+			reasons.push(
+				`Sector "${proposal.sector}" would be ${sectorPct.toFixed(1)}% of portfolio (max ${HARD_LIMITS.MAX_SECTOR_EXPOSURE_PCT}%)`,
+			);
+		}
+	}
+
+	// --- Volume check (fresh Yahoo data) ---
+	const yahooQuote = await getYahooQuote(proposal.symbol);
+	if (!yahooQuote) {
+		reasons.push("Unable to verify volume — Yahoo Finance quote unavailable");
+	} else if (yahooQuote.avgVolume < HARD_LIMITS.MIN_AVG_VOLUME) {
+		reasons.push(
+			`Avg daily volume ${yahooQuote.avgVolume.toLocaleString()} below minimum ${HARD_LIMITS.MIN_AVG_VOLUME.toLocaleString()}`,
+		);
 	}
 
 	// --- Daily trade count ---
