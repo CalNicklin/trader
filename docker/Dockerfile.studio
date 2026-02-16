@@ -1,12 +1,11 @@
-FROM oven/bun:1
+FROM node:22
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
-
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
+COPY package.json ./
+RUN npm install
 
 COPY src/db/schema.ts src/db/
 COPY drizzle.config.ts ./
 
-CMD ["bunx", "drizzle-kit", "studio", "--host", "0.0.0.0"]
+ENV DB_PATH=/app/data/trader.db
+CMD ["npx", "drizzle-kit", "studio", "--host", "0.0.0.0"]
