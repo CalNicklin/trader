@@ -11,6 +11,7 @@ import { updateScore } from "../research/watchlist.ts";
 import { checkTradeRisk, getMaxPositionSize } from "../risk/manager.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
+import { addIntention, getIntentions, type Intention } from "./orchestrator.ts";
 
 const log = createChildLogger({ module: "agent-tools" });
 
@@ -186,6 +187,36 @@ export const toolDefinitions: Anthropic.Tool[] = [
 			},
 			required: ["message"],
 		},
+	},
+	{
+		name: "log_intention",
+		description:
+			'Log a conditional trading intention for the next tick. Use when you want to remember something across ticks, e.g. "buy SHEL if price drops below 2450". Conditions are evaluated automatically against live quotes each tick.',
+		input_schema: {
+			type: "object" as const,
+			properties: {
+				symbol: { type: "string", description: "Stock ticker symbol" },
+				condition: {
+					type: "string",
+					description:
+						'Price condition in format "price < 2450" or "price > 1200". Supports <, <=, >, >=',
+				},
+				action: {
+					type: "string",
+					description: "What to do when condition is met: BUY, SELL, or RESEARCH",
+				},
+				note: {
+					type: "string",
+					description: "Context for why this intention was set",
+				},
+			},
+			required: ["symbol", "condition", "action", "note"],
+		},
+	},
+	{
+		name: "get_intentions",
+		description: "View all pending trading intentions that are waiting to be triggered",
+		input_schema: { type: "object" as const, properties: {} },
 	},
 ];
 
@@ -380,6 +411,24 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 					phase: "trading",
 				});
 				return JSON.stringify({ logged: true });
+			}
+			case "log_intention": {
+				const intention: Intention = {
+					symbol: (input.symbol as string).toUpperCase(),
+					condition: input.condition as string,
+					action: (input.action as string).toUpperCase(),
+					note: input.note as string,
+					createdAt: new Date().toISOString(),
+				};
+				addIntention(intention);
+				return JSON.stringify({
+					logged: true,
+					intention,
+					pendingCount: getIntentions().length,
+				});
+			}
+			case "get_intentions": {
+				return JSON.stringify(getIntentions());
 			}
 			default:
 				return JSON.stringify({ error: `Unknown tool: ${name}` });

@@ -19,6 +19,95 @@ const lastQuotes = new Map<string, number>();
 /** Price move threshold to trigger analysis */
 const PRICE_MOVE_THRESHOLD = 0.02; // 2%
 
+/** Structured intention logged by the agent via log_intention tool */
+export interface Intention {
+	symbol: string;
+	condition: string; // e.g. "price < 2450", "price > 1200"
+	action: string; // e.g. "BUY", "SELL", "RESEARCH"
+	note: string;
+	createdAt: string;
+}
+
+/** In-memory intention queue — agent adds, shouldRunAnalysis consumes */
+const pendingIntentions: Intention[] = [];
+
+/** Add a new intention (called from executeTool) */
+export function addIntention(intention: Intention): void {
+	pendingIntentions.push(intention);
+	log.info({ intention }, "Intention logged");
+}
+
+/** Get all pending intentions (read-only) */
+export function getIntentions(): readonly Intention[] {
+	return pendingIntentions;
+}
+
+/** Clear all intentions (called at post-market) */
+export function clearIntentions(): void {
+	const count = pendingIntentions.length;
+	pendingIntentions.length = 0;
+	if (count > 0) {
+		log.info({ cleared: count }, "Intentions cleared for end of day");
+	}
+}
+
+/**
+ * Evaluate intentions against current quotes.
+ * Returns fulfilled intentions and removes them from the queue.
+ */
+function evaluateIntentions(quotes: Map<string, Quote>): Intention[] {
+	const fulfilled: Intention[] = [];
+	const remaining: Intention[] = [];
+
+	for (const intent of pendingIntentions) {
+		const quote = quotes.get(intent.symbol);
+		const price = quote?.last ?? null;
+		if (price === null) {
+			remaining.push(intent);
+			continue;
+		}
+
+		// Parse simple conditions: "price < 2450", "price > 1200"
+		const match = intent.condition.match(/price\s*([<>]=?)\s*([\d.]+)/i);
+		if (!match) {
+			// Can't evaluate — keep it and surface it as context
+			remaining.push(intent);
+			continue;
+		}
+
+		const op = match[1]!;
+		const target = Number.parseFloat(match[2]!);
+		let met = false;
+
+		switch (op) {
+			case "<":
+				met = price < target;
+				break;
+			case "<=":
+				met = price <= target;
+				break;
+			case ">":
+				met = price > target;
+				break;
+			case ">=":
+				met = price >= target;
+				break;
+		}
+
+		if (met) {
+			fulfilled.push(intent);
+		} else {
+			remaining.push(intent);
+		}
+	}
+
+	// Replace queue with remaining
+	pendingIntentions.length = 0;
+	pendingIntentions.push(...remaining);
+
+	return fulfilled;
+}
+
 export type OrchestratorState =
 	| "idle"
 	| "pre_market"
@@ -195,6 +284,14 @@ async function shouldRunAnalysis(): Promise<MarketState> {
 		reasons.push(`Guardian alert: ${alert.symbol} moved ${alert.movePct.toFixed(1)}%`);
 	}
 
+	// Evaluate pending intentions against current quotes
+	const fulfilled = evaluateIntentions(quotes);
+	for (const intent of fulfilled) {
+		reasons.push(
+			`Intention triggered: ${intent.action} ${intent.symbol} (${intent.condition}) — "${intent.note}"`,
+		);
+	}
+
 	// Check for new research with actionable signals (last 24h)
 	// BUY signals are always actionable; SELL only if we hold that stock (ISA = long-only, can't short)
 	const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -290,9 +387,11 @@ async function onActiveTradingTick(): Promise<void> {
 			.from(trades)
 			.where(eq(trades.status, "SUBMITTED"));
 
+		const currentIntentions = getIntentions();
 		const scanContext = `Notable changes: ${preFilter.reasons.length > 0 ? preFilter.reasons.join("; ") : "None — routine monitoring tick"}
 Positions: ${positionRows.length === 0 ? "None" : JSON.stringify(positionRows.map((p) => ({ symbol: p.symbol, qty: p.quantity, avgCost: p.avgCost, currentPrice: p.currentPrice, pnl: p.unrealizedPnl })))}
 Pending orders: ${pendingOrders.length === 0 ? "None" : JSON.stringify(pendingOrders)}
+Pending intentions: ${currentIntentions.length === 0 ? "None" : JSON.stringify(currentIntentions)}
 Quotes: ${quoteSummary}
 Research signals: ${recentResearch.length === 0 ? "None" : JSON.stringify(recentResearch)}
 Watchlist top scores: ${watchlistItems
@@ -361,13 +460,14 @@ async function onWindDown(): Promise<void> {
 	});
 }
 
-/** Post-market: reconcile, snapshot, send daily email */
+/** Post-market: reconcile, snapshot, clear intentions */
 async function onPostMarket(): Promise<void> {
 	log.info("Post-market phase starting");
 
 	try {
 		await reconcilePositions();
 		await recordDailySnapshot();
+		clearIntentions();
 
 		log.info("Post-market complete");
 	} catch (error) {
