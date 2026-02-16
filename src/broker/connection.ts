@@ -9,6 +9,8 @@ const log = createChildLogger({ module: "broker-connection" });
 let _api: IBApiNext | null = null;
 let _wasConnected = false;
 let _disconnectAlerted = false;
+let _lastDisconnectEmailAt = 0;
+const DISCONNECT_EMAIL_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 
 export function getApi(): IBApiNext {
 	if (!_api) {
@@ -59,10 +61,16 @@ export async function connect(): Promise<IBApiNext> {
 		if (state === ConnectionState.Disconnected && _wasConnected && !_disconnectAlerted) {
 			_disconnectAlerted = true;
 			log.error("IBKR connection lost after being connected");
-			sendCriticalAlert(
-				"IBKR disconnected",
-				"Connection to IBKR was lost unexpectedly. The agent will attempt to reconnect automatically.",
-			);
+			const now = Date.now();
+			if (now - _lastDisconnectEmailAt >= DISCONNECT_EMAIL_COOLDOWN_MS) {
+				_lastDisconnectEmailAt = now;
+				sendCriticalAlert(
+					"IBKR disconnected",
+					"Connection to IBKR was lost unexpectedly. The agent will attempt to reconnect automatically.",
+				);
+			} else {
+				log.warn("Suppressing disconnect email (cooldown active)");
+			}
 		} else if (state === ConnectionState.Connected) {
 			_disconnectAlerted = false;
 		}
