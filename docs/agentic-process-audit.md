@@ -1,6 +1,6 @@
 # Agentic Process Flow Audit
 
-> Generated 2026-02-16. Complete audit of every automated process, decision path, and data flow in the Trader Agent platform.
+> Updated 2026-02-17 (post Phase 1 implementation). Complete audit of every automated process, decision path, and data flow in the Trader Agent platform.
 
 ---
 
@@ -19,32 +19,37 @@
 11. [Reporting & Notifications](#11-reporting--notifications)
 12. [Data Model (All Tables)](#12-data-model)
 13. [External Dependencies & Failure Modes](#13-external-dependencies--failure-modes)
-14. [Identified Gaps & Potential Failure Points](#14-identified-gaps--potential-failure-points)
+14. [Remaining Gaps & Future Work](#14-remaining-gaps--future-work)
 
 ---
 
 ## 1. System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        TRADER AGENT                             │
-│                                                                 │
-│  ┌───────────┐  ┌──────────────┐  ┌───────────┐  ┌──────────┐  │
-│  │ Scheduler │→ │ Orchestrator │→ │ AI Agent  │→ │  Broker  │  │
-│  │ (10 cron) │  │ (state machine)│ │ (Claude)  │  │  (IBKR)  │  │
-│  └───────────┘  └──────────────┘  └───────────┘  └──────────┘  │
-│        ↕              ↕                ↕               ↕        │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                    SQLite Database                         │  │
-│  │  trades | positions | research | watchlist | agent_logs   │  │
-│  │  daily_snapshots | trade_reviews | weekly_insights | ...  │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│        ↕              ↕                ↕                        │
-│  ┌──────────┐  ┌──────────────┐  ┌───────────┐                 │
-│  │  Email   │  │   Research   │  │  Learning  │                 │
-│  │ (Resend) │  │ (Yahoo/FMP)  │  │  (Reviews) │                 │
-│  └──────────┘  └──────────────┘  └───────────┘                 │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                         TRADER AGENT                                  │
+│                                                                      │
+│  ┌───────────┐  ┌──────────────┐  ┌───────────┐  ┌──────────┐       │
+│  │ Scheduler │→ │ Orchestrator │→ │ AI Agent  │→ │  Broker  │       │
+│  │ (12 cron) │  │(state machine)│ │ (Claude)  │  │  (IBKR)  │       │
+│  └───────────┘  └──────────────┘  └───────────┘  └──────────┘       │
+│        ↕              ↕                ↕               ↕             │
+│  ┌──────────────────────────────────────────────────────────────┐    │
+│  │ ★ Position Guardian (60s interval)                           │    │
+│  │   Stop-losses │ Price updates │ Alerts │ Post-market cleanup │    │
+│  └──────────────────────────────────────────────────────────────┘    │
+│        ↕              ↕                ↕               ↕             │
+│  ┌──────────────────────────────────────────────────────────────┐    │
+│  │                    SQLite Database                            │    │
+│  │  trades | positions | research | watchlist | agent_logs      │    │
+│  │  daily_snapshots | trade_reviews | weekly_insights | ...     │    │
+│  └──────────────────────────────────────────────────────────────┘    │
+│        ↕              ↕                ↕                             │
+│  ┌──────────┐  ┌──────────────┐  ┌───────────┐                      │
+│  │  Email   │  │   Research   │  │  Learning  │                      │
+│  │ (Resend) │  │ (Yahoo/FMP)  │  │  (Reviews) │                      │
+│  └──────────┘  └──────────────┘  └───────────┘                      │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 **Stack:** Bun + TypeScript + SQLite (Drizzle ORM) + IBKR (@stoqey/ib) + Claude API + Resend
@@ -64,16 +69,19 @@ Boot Sequence:
   3. Seed database (risk config defaults, exclusions)
   4. Connect to IBKR (5 retries, 3s backoff, 15s timeout each)
   5. Fetch & log account summary (verify connection)
-  6. Start scheduler (10 cron tasks registered)
-  7. Start admin HTTP server (127.0.0.1:3847)
-  8. Ready — waiting for cron ticks or HTTP triggers
+  6. Start scheduler (12 cron tasks registered)
+  7. Start Position Guardian (60s interval loop)
+  8. Start admin HTTP server (127.0.0.1:3847)
+  9. Run catch-up tick if restarting mid-session (>2h since last activity during market hours)
+  10. Ready — waiting for cron ticks, guardian loop, or HTTP triggers
 
 Graceful Shutdown (SIGINT/SIGTERM):
   1. Stop admin server
-  2. Stop all cron tasks
-  3. Disconnect IBKR
-  4. Close SQLite
-  5. process.exit(0)
+  2. Stop Position Guardian (clears interval)
+  3. Stop all cron tasks
+  4. Disconnect IBKR
+  5. Close SQLite
+  6. process.exit(0)
 
 Crash Protection:
   - Unhandled rejection storm: ≥10 in 60s → critical alert email + exit
@@ -88,13 +96,15 @@ All times **Europe/London**. Weekdays only unless noted.
 
 | Time | Job | Cron Pattern | What It Does |
 |------|-----|-------------|--------------|
+| **07:00** | `heartbeat` | `0 7 * * 1-5` | Sends alive-confirmation email with hostname and uptime |
 | **07:30** | `pre_market` | `30 7 * * 1-5` | Sync account, reconcile positions, generate day plan via Sonnet |
-| **07:40–16:40** | `orchestrator_tick` | `*/20 7-16 * * 1-5` | Three-tier analysis: pre-filter → Haiku scan → Sonnet agent |
-| **16:35** | `post_market` | `35 16 * * 1-5` | Reconcile positions, record daily snapshot |
-| **17:00** | `daily_summary` | `0 17 * * 1-5` | Email daily performance report |
-| **17:15** | `trade_review` | `15 17 * * 1-5` | Claude reviews each filled trade (lessons learned) |
+| **08:00–15:59** | `orchestrator_tick` | `*/20 8-15 * * 1-5` | Three-tier analysis: pre-filter → Haiku scan → Sonnet agent |
+| **16:00, 16:20** | `orchestrator_tick` | `0,20 16 * * 1-5` | Final ticks before wind-down |
+| **16:35** | `post_market` | `35 16 * * 1-5` | Reconcile positions, record daily snapshot, clear intentions |
+| **17:00** | `daily_summary` | `0 17 * * 1-5` | Email daily performance report (includes stale PR alerts) |
+| **17:15** | `trade_review` | `15 17 * * 1-5` | Claude reviews each filled, cancelled, and expired trade |
 | **17:30 Fri** | `weekly_summary` | `30 17 * * 5` | Email weekly performance report |
-| **18:00** | `research_pipeline` | `0 18 * * 1-5` | Discover stocks, scrape news, deep-research stale symbols |
+| **18:00** | `research_pipeline` | `0 18 * * 1-5` | Score decay, discover stocks, scrape news, deep-research stale symbols |
 | **19:00 Wed** | `mid_week_analysis` | `0 19 * * 3` | Pattern analysis (confidence calibration, sector, timing) |
 | **19:00 Fri** | `end_of_week_analysis` | `0 19 * * 5` | Full-week pattern analysis |
 | **20:00 Sun** | `self_improvement` | `0 20 * * 0` | Performance eval, auto-pause if bad, propose code changes via PR |
@@ -104,21 +114,31 @@ All times **Europe/London**. Weekdays only unless noted.
 ```
 05:00 UTC  IB Gateway cold restart
            │
+07:00      HEARTBEAT ─── Email: "alive, uptime Xh"
 07:30      PRE-MARKET ─── Day plan generated (Sonnet)
            │              Positions reconciled
-08:00      ┌─ MARKET OPEN ──────────────────────────────────┐
-08:00      │  orchestrator_tick (every 20 min)               │
-08:20      │  orchestrator_tick                              │
-08:40      │  orchestrator_tick                              │
-  ...      │  ... (roughly 25 ticks total) ...               │
-16:00      │  orchestrator_tick (last)                       │
-16:25      │  WIND-DOWN — no new orders                     │
-16:30      └─ MARKET CLOSE ─────────────────────────────────┘
-16:35      POST-MARKET ─── Reconcile, snapshot
-17:00      DAILY SUMMARY ─── Email sent
+           │              Day plan stored in memory for later ticks
+08:00      ┌─ MARKET OPEN ────────────────────────────────────────┐
+08:00      │  orchestrator_tick (every 20 min)                     │
+08:20      │  orchestrator_tick                                    │
+08:40      │  orchestrator_tick                                    │
+  ...      │  ...                                                  │
+           │  ★ Guardian running every 60s in parallel:            │
+           │    - Stop-loss enforcement (MARKET SELL)              │
+           │    - Position price/PnL updates                       │
+           │    - Price alert accumulator (>3% moves)              │
+           │                                                       │
+16:00      │  orchestrator_tick                                    │
+16:20      │  orchestrator_tick (last before wind-down)            │
+16:25      │  WIND-DOWN — no new BUY orders (enforced in code)    │
+16:30      └─ MARKET CLOSE ───────────────────────────────────────┘
+           │  ★ Guardian cleanup: expire unfilled SUBMITTED orders
+16:35      POST-MARKET ─── Reconcile, snapshot (retries 3x),
+           │                clear intentions + inter-tick memory
+17:00      DAILY SUMMARY ─── Email sent (includes stale PR alerts)
 17:15      TRADE REVIEW ─── Each trade analyzed for lessons
 17:30 Fri  WEEKLY SUMMARY ─── Email sent
-18:00      RESEARCH PIPELINE ─── Discover + analyze stocks
+18:00      RESEARCH PIPELINE ─── Score decay + discover + analyze
 19:00 W/F  PATTERN ANALYSIS ─── Confidence/sector/timing insights
 20:00 Sun  SELF-IMPROVEMENT ─── Performance eval + code PRs
 ```
@@ -126,8 +146,10 @@ All times **Europe/London**. Weekdays only unless noted.
 ### Job Execution Safeguards
 
 - **Single-job concurrency lock:** Only one job runs at a time. If a previous job is still running, the next is skipped.
-- **IBKR dependency:** 6 jobs require broker connection (`orchestrator_tick`, `mini_analysis`, `pre_market`, `post_market`, `daily_summary`). They skip silently if disconnected.
+- **IBKR dependency:** Jobs requiring broker connection skip silently if disconnected.
 - **No cascading failures:** Each job catches its own errors, logs to DB, releases lock.
+- **Catch-up tick:** On restart during market hours, if last agent_logs entry is >2h old, immediately runs `orchestrator_tick`.
+- **Cron alignment:** Tick crons aligned to actual LSE market phases — no wasted ticks in closed/post-market windows.
 
 ---
 
@@ -139,12 +161,12 @@ The orchestrator is a **state machine** that detects the current market phase an
 
 ```
 Market Phase Detection (src/utils/clock.ts):
-  07:30–08:00  →  pre_market
-  08:00–16:25  →  active_trading
-  16:25–16:30  →  wind_down
-  16:30–17:00  →  post_market
+  07:30–08:00  →  pre-market
+  08:00–16:25  →  open
+  16:25–16:30  →  wind-down
+  16:30–17:00  →  post-market
   18:00–22:00  →  research
-  Otherwise    →  idle
+  Otherwise    →  closed
 
 State: idle | pre_market | active_trading | wind_down | post_market | research | paused
 ```
@@ -155,24 +177,37 @@ State: idle | pre_market | active_trading | wind_down | post_market | research |
 1. `getAccountSummary()` from IBKR
 2. `reconcilePositions()` — sync DB positions with IBKR
 3. Load top 20 watchlist items (by score)
-4. `buildLearningBrief()` — compile last 5 weekly insights + 5 trade review lessons
+4. `buildLearningBrief()` — compile last 5 weekly insights + 5 trade review lessons (sorted by severity: critical > warning > info)
 5. Call `runTradingAnalyst(DAY_PLAN_PROMPT)` — Sonnet generates a day plan
-6. Log plan to `agent_logs`
+6. **Store day plan in `currentDayPlan` (inter-tick memory)**
+7. Log plan to `agent_logs`
 
 **`onActiveTradingTick()`** — Runs every 20 min during market hours
 → See [Section 5: Three-Tier Decision Architecture](#5-three-tier-decision-architecture)
 
 **`onWindDown()`** — 16:25–16:30
 - Logs "wind-down" message
-- No new orders allowed (enforced at agent level)
+- BUY orders are **rejected in code** by `place_trade` Gate 1 (checks market phase)
 
 **`onPostMarket()`** — 16:30–17:00
 1. `reconcilePositions()` — final position sync
-2. `recordDailySnapshot()`:
+2. `recordDailySnapshot()` — **retries up to 3 times** (30s backoff between attempts):
    - Get account value
    - Calculate daily P&L vs yesterday's snapshot
    - Count today's trades (wins/losses)
    - Store to `daily_snapshots` table
+3. `clearIntentions()` — wipe all pending intentions
+4. Clear `currentDayPlan` and `lastAgentResponse` inter-tick memory
+
+### Inter-Tick Memory
+
+The orchestrator maintains three pieces of state across 20-minute ticks:
+
+| Memory | Set By | Used By | Cleared |
+|--------|--------|---------|---------|
+| `currentDayPlan` | Pre-market (07:30) | Tier 3 Sonnet context | Post-market |
+| `lastAgentResponse` | Tier 3 Sonnet agent | Tier 3 Sonnet context (next tick) | Post-market |
+| `pendingIntentions[]` | Agent via `log_intention` tool | Tier 1 pre-filter (evaluated against quotes) | Post-market (or when fulfilled) |
 
 ---
 
@@ -183,54 +218,77 @@ State: idle | pre_market | active_trading | wind_down | post_market | research |
 ```
 Every 20 min during market hours:
 
-┌──────────────────────────────────────────────────────┐
-│ TIER 1: Code Pre-Filter (FREE)                       │
-│                                                      │
-│  Check: Open positions? → reason                     │
-│  Check: Pending orders? → reason                     │
-│  Check: Quotes for top 10 watchlist                  │
-│  Check: >2% price move? → reason                     │
-│  Check: Actionable research (24h)?                   │
-│         BUY signals always; SELL only if held         │
-│                                                      │
-│  Result: reasons[] array                             │
-│  If empty → RETURN (skip Tiers 2+3)                  │
-└──────────────────────────┬───────────────────────────┘
-                           │ reasons exist
-                           ▼
-┌──────────────────────────────────────────────────────┐
-│ TIER 2: Haiku Quick Scan (~$0.02)                    │
-│                                                      │
-│  Model: claude-haiku-4-5-20251001                    │
-│  Max tokens: 256                                     │
-│  No tools — JSON response only                       │
-│                                                      │
-│  Input: reasons, positions, pending orders,          │
-│         quotes, recent research                      │
-│                                                      │
-│  Decision: { escalate: boolean, reason: string }     │
-│                                                      │
-│  If NOT escalate → log & RETURN                      │
-└──────────────────────────┬───────────────────────────┘
-                           │ escalate = true
-                           ▼
-┌──────────────────────────────────────────────────────┐
-│ TIER 3: Full Sonnet Agent Loop (~$1.70)              │
-│                                                      │
-│  Model: claude-sonnet-4-5-20250929                   │
-│  Max tokens: 4096                                    │
-│  Full tool access (17 tools)                         │
-│  Up to 10 agentic iterations                         │
-│                                                      │
-│  Context: account summary, positions, watchlist,     │
-│           research, recent trades, learning brief    │
-│                                                      │
-│  Can: place orders, cancel orders, research symbols, │
-│       check risk, log decisions                      │
-│                                                      │
-│  Returns: text response + tool call log              │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ TIER 1: Code Pre-Filter (FREE)                               │
+│                                                              │
+│  Check: Open positions? → reason                             │
+│  Check: Pending orders? → reason                             │
+│  Check: Quotes for top 10 watchlist                          │
+│  Check: >2% price move? → reason                             │
+│  Check: Guardian alerts (>3% moves between ticks) → reason   │
+│  Check: Intention triggers (evaluated vs quotes) → reason    │
+│  Check: Actionable research (24h)?                           │
+│         BUY signals always; SELL only if held                 │
+│                                                              │
+│  Result: reasons[] array                                     │
+│  (All reasons passed to Tier 2 regardless of count)          │
+└────────────────────────────┬─────────────────────────────────┘
+                             │ always runs
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│ TIER 2: Haiku Quick Scan (~$0.02)                            │
+│                                                              │
+│  Model: claude-haiku-4-5-20251001                            │
+│  Max tokens: 256                                             │
+│  No tools — JSON response only                               │
+│                                                              │
+│  Input: reasons, positions, pending orders,                  │
+│         quotes, recent research, pending intentions           │
+│                                                              │
+│  Decision: { escalate: boolean, reason: string }             │
+│                                                              │
+│  If NOT escalate → log & RETURN                              │
+└────────────────────────────┬─────────────────────────────────┘
+                             │ escalate = true
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│ TIER 3: Full Sonnet Agent Loop (~$1.70)                      │
+│                                                              │
+│  Model: claude-sonnet-4-5-20250929                           │
+│  Max tokens: 4096                                            │
+│  Full tool access (19 tools)                                 │
+│  Up to 10 agentic iterations                                 │
+│                                                              │
+│  Context: account summary, positions, watchlist,             │
+│           research, recent trades, learning brief,           │
+│           ★ today's day plan (first 500 chars),              │
+│           ★ last agent response (first 800 chars),           │
+│           ★ data completeness (missing quotes flagged),      │
+│           ★ portfolio composition (sector % breakdown)       │
+│                                                              │
+│  Can: place orders, cancel orders, research symbols,         │
+│       check risk, log decisions, log intentions              │
+│                                                              │
+│  Returns: text response + tool call log                      │
+│  ★ Response stored as lastAgentResponse for next tick        │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+### Guardian–Orchestrator Integration
+
+The Position Guardian (60s loop) and the Orchestrator (20-min ticks) communicate through an **alert queue**:
+
+```
+Guardian (every 60s):
+  - Fetches quotes for all positions + top 10 watchlist
+  - Detects >3% price moves → pushes to alertQueue[]
+
+Orchestrator (every 20 min):
+  - Tier 1 calls drainAlerts() → consumes all queued alerts
+  - Alerts become escalation reasons for Haiku
+```
+
+This means the orchestrator is aware of significant moves that happened between its 20-minute ticks, even though it only runs periodically.
 
 ### Cost Model
 
@@ -238,7 +296,7 @@ Every 20 min during market hours:
 |----------|-----------|----------------------|
 | Without tiering (25 Sonnet calls/day) | ~$42.50 | ~$850 |
 | With tiering (typical) | ~$1.78 | ~$36 |
-| Tier 1 only (quiet day, no escalation) | ~$0.00 | ~$0 |
+| Tier 1 only (quiet day, no escalation) | ~$0.50 | ~$10 |
 
 ---
 
@@ -254,9 +312,9 @@ Every 20 min during market hours:
 | `QUICK_SCAN_SYSTEM` | Tier 2 quick scan | Haiku | Escalation filter |
 | `DAY_PLAN_PROMPT` | Pre-market | Sonnet | Generate daily trading plan |
 | `MINI_ANALYSIS_PROMPT` | Active trading Tier 3 | Sonnet | Analyze and potentially act |
-| `RISK_REVIEWER_SYSTEM` | Risk review (unused?) | — | Risk assessment |
+| `RISK_REVIEWER_SYSTEM` | Risk review | — | Risk assessment |
 | `SELF_IMPROVEMENT_SYSTEM` | Sunday self-improvement | Sonnet | Propose code changes |
-| `TRADE_REVIEW_PROMPT` | Daily trade review | Haiku | Analyze completed trades |
+| `TRADE_REVIEWER_SYSTEM` | Daily trade review | Sonnet | Analyze completed/cancelled trades |
 | `PATTERN_ANALYSIS_PROMPT` | Mid/end-week analysis | Haiku | Identify patterns |
 
 ### Key Prompt Rules (TRADING_ANALYST_SYSTEM)
@@ -265,11 +323,11 @@ Every 20 min during market hours:
 - Trading philosophy: 5–10% profit targets, 3% stop losses
 - **Always call `get_recent_research` before trading**
 - Research older than 24h → must call `research_symbol` for fresh data
-- Confidence ≥ 0.7 required to act
-- Risk/reward ratio ≥ 2:1
+- Confidence >= 0.7 required to act (enforced in code, not just prompt)
+- Risk/reward ratio >= 2:1
 - 5-step evaluation: Research → Fundamentals → Technical → Risk → Decision
 
-### Agent Tools (17 total)
+### Agent Tools (19 total)
 
 **File:** `src/agent/tools.ts`
 
@@ -284,11 +342,13 @@ Every 20 min during market hours:
 | **Research** | `get_recent_research` | Last 5 research records for a symbol |
 | | `research_symbol` | Run full fresh research pipeline for a symbol |
 | **Trade History** | `get_recent_trades` | Last N trades (default 20) |
-| **Risk** | `check_risk` | Pre-trade risk validation (10-step pipeline) |
+| **Risk** | `check_risk` | Pre-trade risk validation (12-step pipeline) |
 | | `get_max_position_size` | Calculate max allowed quantity for a price |
-| **Execution** | `place_trade` | Submit order (LIMIT/MARKET, BUY/SELL) |
+| **Execution** | `place_trade` | Submit order (LIMIT/MARKET, BUY/SELL) — **3 mandatory gates** |
 | | `cancel_order` | Cancel pending order by trade ID |
 | **Discovery** | `search_contracts` | Find LSE-listed contracts by pattern |
+| **Intentions** | `log_intention` | Log a conditional intention ("buy SHEL if price < 2450") |
+| | `get_intentions` | View all pending intentions |
 | **Audit** | `log_decision` | Write to agent_logs audit trail |
 
 ### Agent Loop Mechanics
@@ -321,7 +381,7 @@ The agent's final text response contains:
 - **Reasoning:** Why this action
 - **Risk:** What could go wrong
 
-Actual trades happen via `place_trade` tool calls during the loop, not from parsing the final text.
+Actual trades happen via `place_trade` tool calls during the loop, not from parsing the final text. Unfulfilled intentions can be explicitly tracked via `log_intention`.
 
 ---
 
@@ -332,21 +392,46 @@ Agent calls place_trade tool
         │
         ▼
 ┌─────────────────────────────────────────────┐
-│ 1. CREATE TRADE RECORD                       │
-│    Insert into trades table: PENDING          │
-│    Fields: symbol, side, qty, orderType,      │
-│            limitPrice, reasoning, confidence   │
+│ GATE 1: MARKET PHASE CHECK                   │
+│   BUY during wind-down/post-market/closed?   │
+│   → REJECTED immediately                     │
+│   (SELLs always pass this gate)              │
+└──────────────────────┬──────────────────────┘
+                       │ passed
+                       ▼
+┌─────────────────────────────────────────────┐
+│ GATE 2: CONFIDENCE THRESHOLD                 │
+│   confidence < 0.7? → REJECTED              │
+│   (Enforced in code, not just prompt)        │
+└──────────────────────┬──────────────────────┘
+                       │ passed
+                       ▼
+┌─────────────────────────────────────────────┐
+│ GATE 3: MANDATORY RISK CHECK                 │
+│   BUY orders → checkTradeRisk() called       │
+│   internally (not at agent's discretion)     │
+│   12-step pipeline (see Section 8)           │
+│   → REJECTED if any check fails              │
+│   (SELLs skip — risk-reducing)               │
+└──────────────────────┬──────────────────────┘
+                       │ passed
+                       ▼
+┌─────────────────────────────────────────────┐
+│ 4. CREATE TRADE RECORD                       │
+│    Insert into trades table: PENDING         │
+│    Fields: symbol, side, qty, orderType,     │
+│            limitPrice, reasoning, confidence  │
 └──────────────────────┬──────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────┐
-│ 2. BUILD IBKR CONTRACT                       │
+│ 5. BUILD IBKR CONTRACT                       │
 │    lseStock(symbol) → {STK, LSE, GBP}       │
 └──────────────────────┬──────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────┐
-│ 3. BUILD IBKR ORDER                          │
+│ 6. BUILD IBKR ORDER                          │
 │    Action: BUY/SELL                          │
 │    Type: LMT/MKT                             │
 │    TIF: DAY (hardcoded — dies at close)      │
@@ -355,7 +440,7 @@ Agent calls place_trade tool
                        │
                        ▼
 ┌─────────────────────────────────────────────┐
-│ 4. SUBMIT TO IBKR                            │
+│ 7. SUBMIT TO IBKR                            │
 │    api.placeNewOrder(contract, order)         │
 │    Returns: ibOrderId (number)               │
 │    Update trade: status → SUBMITTED          │
@@ -363,7 +448,7 @@ Agent calls place_trade tool
                        │
                        ▼
 ┌─────────────────────────────────────────────┐
-│ 5. MONITOR ORDER (async subscription)        │
+│ 8. MONITOR ORDER (async subscription)        │
 │    Subscribe to api.getOpenOrders()          │
 │    Watch for status changes:                 │
 │      Submitted → SUBMITTED                   │
@@ -380,15 +465,29 @@ Agent calls place_trade tool
 ```
 PENDING → SUBMITTED → FILLED
                    → PARTIALLY_FILLED
-                   → CANCELLED
+                   → CANCELLED (by agent, guardian, or market close)
                    → ERROR
 ```
 
 ### Order Types
 
 - **LIMIT** — Agent specifies `limitPrice`. Most common.
-- **MARKET** — Immediate execution at best available.
+- **MARKET** — Immediate execution at best available. Used by Guardian stop-loss.
 - **Time-in-Force:** Always "DAY" (order expires at market close).
+
+### Stop-Loss Execution
+
+Stop losses are enforced by the **Position Guardian** (not the agent):
+
+```
+Guardian (every 60s):
+  For each position with stopLossPrice:
+    If current price <= stopLossPrice:
+      → placeTrade(MARKET SELL, full quantity)
+      → Log to agent_logs (phase: "guardian")
+```
+
+This runs independently of the 20-minute orchestrator ticks, providing near-real-time stop-loss protection.
 
 ---
 
@@ -396,9 +495,9 @@ PENDING → SUBMITTED → FILLED
 
 **Files:** `src/risk/manager.ts`, `src/risk/limits.ts`, `src/risk/exclusions.ts`
 
-### Pre-Trade Risk Check (`check_risk` tool)
+### Pre-Trade Risk Check (12-step pipeline)
 
-Called by the agent **before** every `place_trade`. Returns `{ approved: boolean, reasons: string[] }`.
+Called **automatically inside `place_trade`** for all BUY orders (Gate 3). Also available as `check_risk` tool for the agent to pre-validate.
 
 ```
 TradeProposal { symbol, side, quantity, estimatedPrice, sector? }
@@ -417,18 +516,18 @@ TradeProposal { symbol, side, quantity, estimatedPrice, sector? }
         │
         ▼
 ┌─ CHECK 3: PRICE ─────────────────────────────────────────────┐
-│  Price ≥ £0.10? (penny stock protection)                     │
+│  Price >= £0.10? (penny stock protection)                     │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌─ CHECK 4: POSITION SIZING ───────────────────────────────────┐
-│  Trade value ≤ 5% of portfolio?                              │
-│  Trade value ≤ £50,000?                                      │
+│  Trade value <= 5% of portfolio?                              │
+│  Trade value <= £50,000?                                      │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌─ CHECK 5: CASH RESERVE ─────────────────────────────────────┐
-│  (cash - trade value) / net liq ≥ 20%?                      │
+│  (cash - trade value) / net liq >= 20%?                      │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -437,23 +536,37 @@ TradeProposal { symbol, side, quantity, estimatedPrice, sector? }
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
-┌─ CHECK 7: DAILY TRADE FREQUENCY ────────────────────────────┐
+┌─ CHECK 7: SECTOR CONCENTRATION ★NEW ────────────────────────┐
+│  If sector provided: sum market value for that sector        │
+│  (Sector looked up via watchlist table)                      │
+│  Would sector exceed 30% of portfolio? → reject              │
+└──────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─ CHECK 8: VOLUME ★NEW ──────────────────────────────────────┐
+│  Fetch fresh Yahoo Finance quote                             │
+│  avgVolume < 50,000? → reject                                │
+│  Yahoo unavailable? → reject (conservative)                  │
+└──────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─ CHECK 9: DAILY TRADE FREQUENCY ────────────────────────────┐
 │  Today's BUY trades < 10?                                   │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
-┌─ CHECK 8: TRADE INTERVAL ───────────────────────────────────┐
+┌─ CHECK 10: TRADE INTERVAL ──────────────────────────────────┐
 │  Last trade > 15 minutes ago?                               │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
-┌─ CHECK 9: DAILY LOSS LIMIT ─────────────────────────────────┐
+┌─ CHECK 11: DAILY LOSS LIMIT ────────────────────────────────┐
 │  Daily P&L > -2%? (circuit breaker)                         │
 │  Blocks ALL trades if breached                              │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
-┌─ CHECK 10: WEEKLY LOSS LIMIT ───────────────────────────────┐
+┌─ CHECK 12: WEEKLY LOSS LIMIT ───────────────────────────────┐
 │  Weekly P&L > -5%? (ultimate circuit breaker)               │
 │  Blocks ALL trades if breached                              │
 └──────────────────────────────────────────────────────────────┘
@@ -464,22 +577,24 @@ TradeProposal { symbol, side, quantity, estimatedPrice, sector? }
 
 ### Hard Limits (Cannot Be Overridden by Agent)
 
-| Limit | Value | Purpose |
-|-------|-------|---------|
+| Limit | Value | Enforcement |
+|-------|-------|-------------|
 | ISA cash only | true | No margin, no shorting |
-| Max position % | 5% | Single-stock concentration |
-| Max position £ | £50,000 | Hard GBP cap |
-| Cash reserve | 20% | Always keep cash buffer |
-| Stop loss | 3% | Per-trade loss limit |
-| Daily loss | 2% | Daily circuit breaker |
-| Weekly loss | 5% | Weekly circuit breaker |
-| Max positions | 10 | Portfolio diversification |
-| Max trades/day | 10 | Frequency cap |
-| Trade interval | 15 min | Cooldown between trades |
-| Max sector | 30% | Sector concentration |
-| Min price | £0.10 | No penny stocks |
-| Min volume | 50,000 | Liquidity requirement |
-| Pause threshold | <40% win rate for 2 weeks | Auto-pause |
+| Max position % | 5% | Risk pipeline check 4 |
+| Max position £ | £50,000 | Risk pipeline check 4 |
+| Cash reserve | 20% | Risk pipeline check 5 |
+| Stop loss | 3% | Guardian enforces via MARKET SELL |
+| Daily loss | 2% | Risk pipeline check 11 |
+| Weekly loss | 5% | Risk pipeline check 12 |
+| Max positions | 10 | Risk pipeline check 6 |
+| Max trades/day | 10 | Risk pipeline check 9 |
+| Trade interval | 15 min | Risk pipeline check 10 |
+| Max sector | 30% | Risk pipeline check 7 |
+| Min price | £0.10 | Risk pipeline check 3 |
+| Min volume | 50,000 | Risk pipeline check 8 (Yahoo) |
+| Confidence threshold | 0.7 | `place_trade` Gate 2 |
+| Wind-down BUY block | 16:25+ | `place_trade` Gate 1 |
+| Pause threshold | Wilson lower bound <40% | Self-improvement check |
 
 ---
 
@@ -488,6 +603,19 @@ TradeProposal { symbol, side, quantity, estimatedPrice, sector? }
 **File:** `src/research/pipeline.ts`
 
 **When:** Daily at 18:00 (after market close)
+
+### Stage 0: Score Decay (runs first)
+
+```
+For each active watchlist symbol:
+  weeksStale = (now - lastResearchedAt) / 7 days
+  decay = floor(weeksStale) × 5 points
+  newScore = max(0, score - decay)
+  If newScore < 10 → deactivate symbol
+
+→ Prevents stale scores from misleading the agent
+→ Naturally prunes watchlist of unmaintained symbols
+```
 
 ### Stage 1: Universe Screening (FMP)
 
@@ -512,6 +640,7 @@ Sector Rotation Schedule:
   MarketWatch, CNBC World, Investing.com UK
 
 → Match articles to watchlist symbols (name/ticker matching)
+→ ★ Names loaded dynamically from watchlist DB + static aliases
 → Unmatched articles → Claude (Haiku) extracts LSE tickers
 → Verify via FMP profile → add to watchlist (max 3/run)
 ```
@@ -519,7 +648,12 @@ Sector Rotation Schedule:
 ### Stage 3: Deep Research (up to 10 symbols)
 
 ```
-For each stale symbol (not researched in 24h):
+Symbol selection priority:
+  1. Held positions (always researched first)
+  2. Highest score (most promising first)
+  3. Stalest (longest since last research)
+
+For each selected symbol:
 
   1. Yahoo Finance quote + fundamentals
   2. IBKR historical bars (1 month, if connected)
@@ -534,6 +668,7 @@ For each stale symbol (not researched in 24h):
     - action: BUY / SELL / HOLD / WATCH
     - confidence: 0–1
     - bullCase, bearCase, analysis
+    - ★ dataQuality: "full" / "partial" / "minimal"
          │
          ▼
   Store to research table
@@ -550,6 +685,7 @@ score = sentimentScore + confidenceScore + actionBonus
   actionBonus     = BUY → +20, WATCH → +5, HOLD/SELL → 0
 
   Clamped to [0, 100]
+  Decayed: -5 points per week stale (deactivated at <10)
 ```
 
 ### Data Sources Summary
@@ -557,7 +693,7 @@ score = sentimentScore + confidenceScore + actionBonus
 | Source | What | Rate Limit | Fallback |
 |--------|------|-----------|----------|
 | IBKR | Real-time quotes, bars, account, orders | 40 req/sec | FMP |
-| Yahoo Finance | Quotes, fundamentals | None explicit | Graceful null |
+| Yahoo Finance | Quotes, fundamentals, volume check | None explicit | Graceful null |
 | FMP | Screener, profiles, quotes | 5 req/min (free tier) | Skip |
 | RSS (8 feeds) | News articles | 15 feeds/min | Skip |
 
@@ -570,14 +706,16 @@ score = sentimentScore + confidenceScore + actionBonus
 **File:** `src/learning/trade-reviewer.ts`
 
 ```
-For each FILLED trade today (not yet reviewed):
+For each trade today (not yet reviewed):
+  ★ Includes: FILLED (with PnL), CANCELLED, and expired SUBMITTED orders
 
   Gather context:
     - 3 most recent research records for symbol
     - Agent decisions within ±30 min of trade
     - Trade details (side, price, P&L)
+    - ★ For non-executed trades: prompt includes limit price assessment
 
-  Claude (Haiku) Review → trade_reviews table:
+  Claude (Sonnet) Review → trade_reviews table:
     - outcome: win / loss / breakeven
     - reasoningQuality: sound / partial / flawed
     - lessonLearned: 1-sentence takeaway
@@ -591,7 +729,7 @@ For each FILLED trade today (not yet reviewed):
 
 ```
 Input (7-day window):
-  - Trade reviews with outcomes
+  - Trade reviews with outcomes (★ minimum 1 review, was 3)
   - Confidence calibration: win rate by bucket (0.7–0.8, 0.8–0.9, 0.9–1.0)
   - Sector breakdown: win rate + avg P&L by sector
   - Tag frequency: which tags appear in wins vs losses
@@ -609,9 +747,10 @@ Claude (Haiku) → weekly_insights table (up to 5 insights):
 
 ```
 buildLearningBrief():
-  - Last 5 weekly insights
+  - Last 15 weekly insights, ★ sorted by severity (critical > warning > info)
+  - Top 5 delivered to agent
   - Last 5 trade review lessons
-  - Critical/warning items flagged
+  - Critical/warning items prioritised
 
 → Injected into DAY_PLAN_PROMPT
 → Agent sees warnings before market open
@@ -623,9 +762,10 @@ buildLearningBrief():
 
 ```
 1. Performance Pause Check:
-   if win rate < 40% for 2+ consecutive weeks:
+   ★ Wilson score lower bound (z=1.96, 95% confidence interval)
+   if wilsonLower(wins, total) < 40% AND total >= 5:
      → setPaused(true)
-     → Send alert email
+     → Send alert email with raw rate + Wilson bound
      → Require manual restart
 
 2. Gather: 2 weeks trades, reviews, insights, metrics (7d + 90d)
@@ -637,7 +777,6 @@ buildLearningBrief():
 4. Whitelist of modifiable files ONLY:
    ✅ src/agent/prompts/*.ts (system prompts, frameworks)
    ✅ src/research/watchlist.ts (scoring weights)
-   ✅ Risk config table values
    ❌ Core trading logic
    ❌ Broker code
    ❌ Database schema
@@ -658,25 +797,25 @@ buildLearningBrief():
               │  (executes   │
               │   trades)    │
               └──────┬───────┘
-                     │ fills
+                     │ fills + cancels + expirations
                      ▼
               ┌──────────────┐
               │ TRADE REVIEW │ ← 17:15 daily
-              │ (lesson per  │
-              │  trade)      │
+              │ (lesson per  │   ★ Reviews ALL outcomes
+              │  trade)      │     not just fills
               └──────┬───────┘
                      │ reviews
                      ▼
               ┌──────────────┐
               │   PATTERN    │ ← Wed/Fri 19:00
-              │  ANALYSIS    │
+              │  ANALYSIS    │   ★ Min 1 review (was 3)
               │ (insights)   │
               └──────┬───────┘
                      │ insights
                      ▼
               ┌──────────────┐
               │   LEARNING   │ ← 07:30 daily
-              │    BRIEF     │
+              │    BRIEF     │   ★ Severity-sorted
               │ (fed to agent│
               │  at pre-mkt) │
               └──────┬───────┘
@@ -684,8 +823,8 @@ buildLearningBrief():
                      ▼
               ┌──────────────┐
               │   DAY PLAN   │ ← 07:30 daily
-              │ (adjusted    │
-              │  strategy)   │
+              │ (adjusted    │   ★ Stored in memory
+              │  strategy)   │     for later ticks
               └──────┬───────┘
                      │ influences
                      ▼
@@ -696,6 +835,7 @@ buildLearningBrief():
 Sunday branch:
   Self-Improvement
     → Analyzes all of the above
+    → ★ Wilson score pause check
     → Proposes prompt/scoring changes
     → Creates PRs on GitHub
 ```
@@ -710,19 +850,24 @@ Sunday branch:
 
 | Report | When | Content |
 |--------|------|---------|
-| **Daily Summary** | 17:00 weekdays | Portfolio value, daily P&L, 30-day metrics (win rate, Sharpe, drawdown), today's trades, open positions, API costs |
+| **Heartbeat** | 07:00 weekdays | Hostname, uptime (confirms system alive) |
+| **Daily Summary** | 17:00 weekdays | Portfolio value, daily P&L, 30-day metrics (win rate, Sharpe, drawdown), today's trades, open positions, API costs, **stale PR alerts** |
 | **Weekly Summary** | 17:30 Friday | Weekly P&L, daily breakdown table, all-time stats, sector breakdown |
 
-**Email subject format:** `+£X.XX | Daily Trading Summary 2026-02-16` (color-coded positive/negative)
+**Email subject format:** `+£X.XX | Daily Trading Summary 2026-02-17` (color-coded positive/negative)
+
+### Stale PR Alerts
+
+The daily summary email includes a section highlighting self-improvement PRs that have been open for >7 days, with an amber background. This ensures improvement proposals don't accumulate unnoticed.
 
 ### Alert Emails
 
 | Trigger | Content | Cooldown |
 |---------|---------|----------|
 | IBKR disconnect | "IBKR disconnected" + auto-reconnect note | 30 min |
-| Unhandled rejection storm (≥10 in 60s) | Critical crash alert | None |
+| Unhandled rejection storm (>=10 in 60s) | Critical crash alert | None |
 | Uncaught exception | Critical crash alert | None |
-| Auto-pause (win rate < 40%) | Performance warning | None |
+| Auto-pause (Wilson score <40%) | Performance warning with raw + Wilson rates | None |
 
 ### Metrics Calculated
 
@@ -731,11 +876,11 @@ Sunday branch:
 | Win rate | trades (FILLED with P&L) |
 | Avg win / avg loss | trades (FILLED) |
 | Profit factor | avg win / avg loss |
-| Sharpe ratio | (avg daily return / std dev) × √252 |
+| Sharpe ratio | (avg daily return / std dev) x sqrt(252) |
 | Max drawdown | Peak-to-trough from daily_snapshots |
 | Total P&L | Portfolio value - initial |
 | Daily/Weekly P&L | Snapshot comparisons |
-| API costs | token_usage table |
+| API costs | token_usage table (with cache discount) |
 
 ---
 
@@ -746,11 +891,11 @@ Sunday branch:
 | Table | Purpose | Key Fields | Records Created By |
 |-------|---------|------------|-------------------|
 | `trades` | Order execution log | symbol, side, qty, status, ibOrderId, pnl, reasoning, confidence | `place_trade` tool |
-| `positions` | Open holdings | symbol, qty, avgCost, currentPrice, unrealizedPnl, stopLoss, target | Reconciliation |
-| `research` | Stock analysis | symbol, sentiment, action, confidence, bullCase, bearCase | Research pipeline |
+| `positions` | Open holdings | symbol, qty, avgCost, currentPrice, unrealizedPnl, stopLoss, target | Reconciliation + Guardian |
+| `research` | Stock analysis | symbol, sentiment, action, confidence, bullCase, bearCase, dataQuality | Research pipeline |
 | `watchlist` | Stock universe | symbol, name, sector, score, active | Discovery + pipeline |
-| `dailySnapshots` | EOD portfolio | date, portfolioValue, dailyPnl, tradesCount, wins, losses | Post-market |
-| `agentLogs` | Audit trail | level, phase, message, data (JSON) | All jobs + agent |
+| `dailySnapshots` | EOD portfolio | date, portfolioValue, dailyPnl, tradesCount, wins, losses | Post-market (with retry) |
+| `agentLogs` | Audit trail | level, phase, message, data (JSON) | All jobs + agent + guardian |
 | `tradeReviews` | Trade lessons | tradeId, outcome, reasoningQuality, lessonLearned, tags | Trade review job |
 | `weeklyInsights` | Pattern discoveries | category, insight, actionable, severity, data | Pattern analysis |
 | `tokenUsage` | API cost tracking | job, inputTokens, outputTokens, estimatedCostUsd | Every Claude call |
@@ -766,7 +911,7 @@ Sunday branch:
 |------------|----------|-------------|----------|
 | **IBKR Gateway** | Quotes, orders, account | Cold restart at 05:00 UTC; random disconnects | Auto-reconnect (5s), alert email (30min cooldown) |
 | **Claude API** | All AI decisions | Rate limit / outage | Logged error, job skipped, no cascading |
-| **Yahoo Finance** | Fundamentals, quotes | API changes / rate limits | Returns null, research continues without |
+| **Yahoo Finance** | Fundamentals, quotes, volume check | API changes / rate limits | Returns null; risk check rejects BUY on null (conservative) |
 | **FMP** | Stock screening, fallback quotes | 5 req/min limit / key invalid | Graceful skip, discovery halted |
 | **RSS Feeds** | News articles | Feed down / format change | Individual feed failure OK, others continue |
 | **Resend** | Email notifications | API error | Logged, non-critical |
@@ -775,109 +920,73 @@ Sunday branch:
 
 ### IBKR-Specific Edge Cases
 
-- **IB Gateway restarts at 05:00 UTC** — Connection lost, auto-reconnect kicks in before 07:30 pre-market
+- **IB Gateway restarts at 05:00 UTC** — Connection lost, auto-reconnect kicks in before 07:00 heartbeat
 - **Market data gaps** — Quote timeout (10s) → FMP fallback → null if both fail
 - **Order monitoring** — 1-hour auto-unsubscribe prevents subscription leaks
 - **Commission filtering** — Values > 1e9 ignored (IBKR sentinel values)
+- **Guardian during disconnect** — getQuotes fails gracefully, guardian tick skipped
 
 ---
 
-## 14. Identified Gaps & Potential Failure Points
+## 14. Remaining Gaps & Future Work
 
-### A. Decision Quality
+### Resolved in Phase 1
 
-| # | Gap | Impact | Severity |
-|---|-----|--------|----------|
-| A1 | **Agent decisions are not parsed programmatically** — the final text response is logged but BUY/SELL/HOLD actions happen only through tool calls during the loop. If the agent decides to act but doesn't call `place_trade` (e.g., "I would buy X but let me wait"), there's no mechanism to track unfulfilled intentions. | Missed opportunities go undetected | Medium |
-| A2 | **Confidence threshold (0.7) is prompt-enforced only** — the risk system doesn't verify confidence. The agent self-reports confidence when calling `place_trade`. Nothing prevents it from inflating confidence to bypass the soft threshold. | Agent could override its own guardrail | Low-Medium |
-| A3 | **Day plan is generated but never referenced again** — the plan is logged to `agent_logs` at 07:30, but subsequent orchestrator ticks don't retrieve or reference it. The active trading context doesn't include "today's plan." | Plan is wasted effort; agent doesn't track its own intentions | Medium |
-| A4 | **No stop-loss execution mechanism** — stop losses are stored in `positions.stopLossPrice` and logged as alerts, but there is no automated sell when price breaches stop loss. The agent must notice during a tick and decide to sell. With 20-minute tick intervals, a fast drop could blow through a stop. | Losses can exceed 3% target before agent reacts | High |
-| A5 | **Wind-down is advisory only** — the system logs "wind-down" but `place_trade` doesn't reject orders during 16:25–16:30. If the agent calls `place_trade` in wind-down, it would execute. | ISA day-order timing risk | Low |
+| Original ID | Gap | Resolution |
+|-------------|-----|------------|
+| **A1** | Agent intentions not tracked | `log_intention` / `get_intentions` tools; evaluated against quotes each tick |
+| **A3** | Day plan orphaned after generation | Stored in `currentDayPlan`, injected into Tier 3 context |
+| **A4** | No stop-loss execution | Guardian enforces stop-losses every 60s via MARKET SELL |
+| **A5** | Wind-down advisory only | `place_trade` Gate 1 rejects BUY orders during wind-down/post-market/closed |
+| **D1** | Risk check at agent's discretion | `place_trade` Gate 3 runs `checkTradeRisk()` internally for all BUY orders |
+| **D2** | Snapshot failure breaks loss limits | `recordDailySnapshot()` retries 3x with 30s backoff |
+| **D3** | Sector exposure not enforced | Risk check 7: sector concentration from positions + watchlist |
+| **D4** | Volume not checked | Risk check 8: fresh Yahoo Finance avgVolume >= 50,000 |
+| **E2** | News matching hard-coded | `buildNameMap()` loads names from watchlist DB + static aliases |
+| **E4** | No data quality flag on research | `dataQuality` field: "full"/"partial"/"minimal" based on data availability |
+| **E5** | No score decay, watchlist bloat | -5 points per week stale, deactivate at <10 |
+| **F1** | Only FILLED trades reviewed | Trade reviewer includes CANCELLED and expired orders |
+| **F2** | Pattern analysis requires 3+ reviews | Minimum lowered to 1 |
+| **F4** | Learning brief fixed-size, no priority | Fetches 15 insights, sorts by severity, takes top 5 |
+| **F5** | Auto-pause on small sample | Wilson score lower bound with 95% CI, minimum 5 trades |
+| **G2** | No heartbeat monitoring | 07:00 heartbeat email every weekday |
+| **G4** | Token costs double-counting cache | Cost calculation subtracts cache tokens before adding at discounted rate |
+| **G5** | No backfill for missed jobs | Catch-up tick on restart during market hours (>2h gap) |
 
-### B. Three-Tier Architecture
+Also resolved:
+- **A2** (confidence prompt-only): Confidence >= 0.7 enforced in code via Gate 2
+- **F3** (stale PRs unnoticed): Daily summary shows PRs open >7 days with amber alert
+- **E3** (research priority): Held positions researched first, then by score, then stalest
+- **H3** (no inter-tick memory): Day plan + last agent response persist across ticks
 
-| # | Gap | Impact | Severity |
-|---|-----|--------|----------|
-| B1 | **Tier 1 pre-filter SELL signals require position match** — correct for ISA (long-only), but if position reconciliation is stale (IBKR disconnect), the pre-filter could miss SELL signals for positions it doesn't know about. | May not exit positions when research says SELL | Medium |
-| B2 | **Tier 1 always escalates during market hours** — the code runs Haiku scan for every tick (removed pre-filter gate per commit `086807e`). This means ~25 Haiku calls/day at $0.02 = $0.50/day, which is fine cost-wise, but the Tier 1 pre-filter reasons are still built and logged. The "escalation reasons" are informational only now. | Pre-filter is vestigial — cost savings depend entirely on Haiku's judgment | Low |
-| B3 | **20-minute tick interval** — market-moving events (earnings, news, crashes) could happen between ticks. No real-time event-driven triggers exist. The agent only sees the world every 20 minutes. | Slow reaction to sudden market events | Medium |
-| B4 | **Haiku quick scan has no tools** — it can only assess what's in the context string. If context is incomplete (e.g., quotes failed), Haiku decides on partial data. | Incorrect escalation/non-escalation decisions | Low-Medium |
-
-### C. Trade Execution
-
-| # | Gap | Impact | Severity |
-|---|-----|--------|----------|
-| C1 | **No fill confirmation feedback to agent** — the agent calls `place_trade` and gets back `{tradeId, ibOrderId, status: SUBMITTED}`. It doesn't wait for or receive fill confirmation. The order monitor runs asynchronously. If the order doesn't fill (LIMIT too far from market), the agent isn't aware until next tick. | Agent may think it acted but the order sits unfilled | Medium |
-| C2 | **DAY orders expire silently** — TIF is hardcoded to "DAY". Unfilled limit orders die at market close. The system tracks this via order monitoring, but there's no next-day follow-up to re-evaluate. | Intended positions never opened; no retry logic | Medium |
-| C3 | **No partial fill handling** — `PARTIALLY_FILLED` status is mapped but there's no specific logic for managing partial fills (e.g., cancel remainder, adjust position). | Partial positions may not match intended sizing | Low |
-| C4 | **Order monitoring subscription leaks** — while there's a 1-hour auto-unsubscribe, if many orders are placed, subscriptions accumulate. No cleanup on shutdown for in-flight subscriptions beyond IBKR disconnect. | Resource leak during high-activity days | Low |
-
-### D. Risk Management
-
-| # | Gap | Impact | Severity |
-|---|-----|--------|----------|
-| D1 | **Risk check happens at agent's discretion** — the `check_risk` tool is available but the prompt says "always check risk before trading." If the agent skips it and calls `place_trade` directly, the trade executes without risk checks. There's no enforced gate in `place_trade` that requires a prior `check_risk` call. | Agent could bypass risk system entirely | High |
-| D2 | **Daily/weekly loss limits use snapshots** — if `recordDailySnapshot()` fails (e.g., IBKR disconnected at post-market), the baseline for loss calculations is stale. The circuit breaker might not trigger when it should. | Loss limits could be ineffective after snapshot gaps | Medium |
-| D3 | **Sector exposure check missing from risk pipeline** — `MAX_SECTOR_EXPOSURE_PCT` (30%) is defined in hard limits but the 10-step risk pipeline doesn't include a sector concentration check. The limit exists but isn't enforced. | Could over-concentrate in one sector | Medium |
-| D4 | **Volume check missing from risk pipeline** — `MIN_AVG_VOLUME` (50,000) is defined but not checked in the risk pipeline. Low-liquidity stocks could be traded. | Liquidity risk on entry/exit | Medium |
-
-### E. Research Pipeline
+### Remaining Gaps
 
 | # | Gap | Impact | Severity |
 |---|-----|--------|----------|
-| E1 | **FMP free tier (5 req/min)** — severely limits discovery. Only ~5 new stocks per session. If FMP key expires or is invalid, discovery stops entirely with a silent skip. | Universe growth is very slow; may miss opportunities | Medium |
-| E2 | **News matching is hard-coded** — `SYMBOL_NAMES` dict maps tickers to company names for news matching. Any stock not in this dict won't match news articles. New watchlist additions don't automatically get name mappings. | News signals missed for newer watchlist entries | Medium |
-| E3 | **Research staleness threshold is fixed at 24h** — all symbols go stale at the same rate. A volatile stock and a stable blue-chip are researched with equal priority. No urgency weighting. | Research effort not optimized for where it matters most | Low |
-| E4 | **Research quality depends on Yahoo Finance data** — if Yahoo returns null for fundamentals (happens for some LSE stocks), the Claude analysis works with incomplete data. No warning flag is set on the research record. | Agent trades on incomplete research without knowing | Medium |
-| E5 | **Max 10 symbols researched per day** — with a growing watchlist (hundreds of symbols), most go stale and are never re-researched. Score decay over time is not implemented. | Watchlist bloat; old scores mislead the agent | Medium |
+| B1 | Tier 1 SELL signals depend on reconciliation freshness | May miss SELL if positions stale after IBKR disconnect | Medium |
+| B3 | 20-minute tick interval | Slow reaction to sudden market events (guardian helps with stop-losses but not entry signals) | Medium |
+| B4 | Haiku quick scan has no tools | Decides on partial data if context is incomplete | Low-Medium |
+| C1 | No fill confirmation feedback to agent | Agent doesn't know if limit order filled until next tick | Medium |
+| C2 | DAY orders expire silently | No next-day re-evaluation of unfilled orders | Medium |
+| C3 | No partial fill handling | Partial positions may not match intended sizing | Low |
+| C4 | Order monitoring subscription leaks | 1-hour auto-unsub helps but not perfect | Low |
+| E1 | FMP free tier (5 req/min) | Universe growth is slow; if key expires, discovery stops | Medium |
+| G1 | Single-job concurrency lock | Long research blocks other jobs; no priority system | Low |
+| G3 | Position reconciliation periodic, not event-driven | During trading, DB positions may lag behind IBKR (guardian mitigates with price updates) | Low |
+| H1 | No position-level P&L in real-time | Agent must call get_positions + get_quote (guardian keeps DB current every 60s) | Low |
+| H2 | No portfolio-level optimization | Each trade evaluated independently; no rebalancing or correlation analysis | Medium |
 
-### F. Learning & Self-Improvement
-
-| # | Gap | Impact | Severity |
-|---|-----|--------|----------|
-| F1 | **Trade reviews only happen for FILLED trades** — if an order was CANCELLED or expired (DAY order unfilled), no review happens. Missed trades could contain important lessons (e.g., limit price too aggressive). | Learning blind spot for non-executed trades | Medium |
-| F2 | **Pattern analysis requires 3+ trade reviews** — in quiet weeks with few trades, no pattern analysis runs. The learning loop stalls. | Learning momentum lost during low-activity periods | Low |
-| F3 | **Self-improvement PRs are never auto-merged** — they require manual review. If ignored, improvements accumulate but are never applied. No tracking of PR merge status. | Learning loop is broken at the "apply changes" step | Medium |
-| F4 | **Learning brief is fixed-size (5+5)** — only last 5 insights and 5 reviews. In active periods, important older lessons roll off. No importance weighting. | Critical lessons may be forgotten | Low |
-| F5 | **Auto-pause threshold (40% win rate, 2 weeks)** — requires consistent trading. If the agent rarely trades (low escalation), the sample size is tiny and win rate is noisy. Could pause on 2/5 trades being losses. | False positive pause on small sample | Low-Medium |
-
-### G. Operational
-
-| # | Gap | Impact | Severity |
-|---|-----|--------|----------|
-| G1 | **Single-job concurrency lock** — if the research pipeline runs long (10 symbols × API calls), it blocks the self-improvement job or any manually triggered job. No priority system. | Important jobs delayed by long-running ones | Low |
-| G2 | **No heartbeat monitoring** — the admin server has `/health` but nothing external checks it. If the process crashes between IB Gateway restart (05:00) and pre-market (07:30), nobody knows until daily summary email is missing. | Silent outage during overnight window | Medium |
-| G3 | **Position reconciliation is periodic, not event-driven** — positions sync at pre-market and post-market. During the trading day, positions come from the DB (potentially stale if manual IBKR trading occurs). | Stale position data during trading hours | Low |
-| G4 | **Token usage tracking doesn't capture cache savings** — `estimatedCostUsd` calculates based on input/output tokens but prompt caching reduces actual costs. Reported costs are higher than reality. | Misleading cost data in reports | Low |
-| G5 | **No backfill for missed jobs** — if the system is down during market hours and comes back at 15:00, it doesn't retroactively run missed ticks or the pre-market plan. It just picks up from wherever the clock says. | Missed opportunities on restart days | Medium |
-
-### H. Architecture
-
-| # | Gap | Impact | Severity |
-|---|-----|--------|----------|
-| H1 | **No position-level P&L tracking in real-time** — `unrealizedPnl` in positions table is updated during reconciliation (pre/post-market). During trading hours, the agent must call `get_positions` + `get_quote` to estimate current P&L. This is not pre-computed. | Agent makes decisions without real-time P&L context unless it asks | Medium |
-| H2 | **No portfolio-level optimization** — each trade is evaluated independently. There's no rebalancing logic, correlation analysis, or portfolio-level risk optimization. The agent thinks stock-by-stock. | Portfolio could drift into suboptimal allocations | Medium |
-| H3 | **Agent context window is per-tick** — each orchestrator tick starts a fresh Claude conversation. There's no memory of what the agent said/decided 20 minutes ago beyond what's in the DB context. The "recent context" is limited to last 3 trades + warnings. | Agent can't maintain complex multi-tick strategies | Medium |
-
----
-
-### Severity Summary
+### Severity Summary (Post Phase 1)
 
 | Severity | Count | Key Items |
 |----------|-------|-----------|
-| **High** | 2 | A4 (no stop-loss execution), D1 (risk check not enforced) |
-| **Medium** | 16 | A1, A3, B1, B3, C1, C2, D2, D3, D4, E1, E2, E4, E5, F1, F3, G2, G5, H1, H2, H3 |
-| **Low-Medium** | 4 | A2, B4, F5 |
-| **Low** | 7 | A5, B2, C3, C4, E3, F2, F4, G1, G3, G4 |
+| **High** | 0 | All resolved |
+| **Medium** | 5 | B1, B3, C1, C2, H2 |
+| **Low-Medium** | 1 | B4 |
+| **Low** | 6 | C3, C4, E1, G1, G3, H1 |
 
-### Top Priority Items
+### Phase 2 Planned (Technical Indicators + Expert Prompts)
 
-1. **D1 — Risk check not enforced before trade execution.** The `place_trade` tool should internally call `checkTradeRisk()` and reject if not approved, rather than trusting the agent to call `check_risk` first.
-
-2. **A4 — No automated stop-loss execution.** Stop losses exist in the database but nothing sells when price breaches them. Consider IBKR bracket orders (attached stop-loss), or a dedicated stop-loss monitor running more frequently than 20 minutes.
-
-3. **D3/D4 — Sector exposure and volume checks defined but not enforced.** The limits exist in `HARD_LIMITS` but the risk pipeline doesn't check them. Wire them into `checkTradeRisk()`.
-
-4. **A3 — Day plan is orphaned.** Generate it, but also feed it back into active trading context so the agent follows its own plan.
-
-5. **F3 — Self-improvement PRs never applied.** The learning loop proposes changes but they accumulate in GitHub. Consider auto-merge for prompt-only changes with a rollback mechanism, or at minimum track and alert on unmerged PRs.
+1. **Technical indicator engine** — RSI, SMA, MACD, Bollinger Bands, ATR (pure math, zero AI cost)
+2. **Expert prompt rewrite** — 5-factor scoring framework replacing vague "analyze this stock"
+3. **ATR-based position sizing** — 2x ATR stops instead of fixed 3%, 1% portfolio risk per trade
