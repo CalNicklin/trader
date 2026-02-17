@@ -69,8 +69,10 @@ async function guardianTick(): Promise<void> {
 
 		if (allSymbols.length === 0) return;
 
-		// Single batch quote fetch
-		const quotes = await getQuotes(allSymbols);
+		// Single batch quote fetch — IBKR only, no FMP fallback.
+		// Guardian runs every 60s and would saturate FMP's 5 req/min rate limit,
+		// starving the orchestrator. Guardian gracefully skips symbols without quotes.
+		const quotes = await getQuotes(allSymbols, { skipFmpFallback: true });
 
 		// 1. Stop-loss enforcement
 		await enforceStopLosses(positionRows, quotes);

@@ -57,7 +57,10 @@ export async function getQuote(symbol: string): Promise<Quote> {
 }
 
 /** Get quotes for multiple symbols */
-export async function getQuotes(symbols: string[]): Promise<Map<string, Quote>> {
+export async function getQuotes(
+	symbols: string[],
+	options?: { skipFmpFallback?: boolean },
+): Promise<Map<string, Quote>> {
 	const quotes = new Map<string, Quote>();
 	const results = await Promise.allSettled(symbols.map((s) => getQuote(s)));
 
@@ -72,7 +75,7 @@ export async function getQuotes(symbols: string[]): Promise<Map<string, Quote>> 
 		}
 	}
 
-	if (failedSymbols.length > 0) {
+	if (failedSymbols.length > 0 && !options?.skipFmpFallback) {
 		try {
 			const fmpQuotes = await getFMPQuotes(failedSymbols);
 			for (const [symbol, quote] of fmpQuotes) {
