@@ -8,7 +8,7 @@ import { agentLogs, dailySnapshots, positions, research, trades, watchlist } fro
 import { buildLearningBrief, buildRecentContext } from "../learning/context-builder.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
-import { runQuickScan, runTradingAnalyst, runTradingAnalystFast } from "./planner.ts";
+import { runTradingAnalyst, runTradingAnalystFast } from "./planner.ts";
 import { getDayPlanPrompt, getMiniAnalysisPrompt } from "./prompts/trading-analyst.ts";
 
 const log = createChildLogger({ module: "orchestrator" });
@@ -18,10 +18,6 @@ const lastQuotes = new Map<string, number>();
 
 /** Price move threshold to trigger analysis */
 const PRICE_MOVE_THRESHOLD = 0.02; // 2%
-
-/** Minimum minutes between Sonnet agent runs (cost control) */
-const SONNET_COOLDOWN_MS = 60 * 60 * 1000; // 60 minutes
-let lastSonnetRun = 0;
 
 /** Structured intention logged by the agent via log_intention tool */
 export interface Intention {
@@ -362,82 +358,13 @@ async function onActiveTradingTick(): Promise<void> {
 			}
 		}
 
-		// Build context for Haiku scan
+		// Build context for Haiku agent
 		const watchlistItems = await db
 			.select()
 			.from(watchlist)
 			.where(eq(watchlist.active, true))
 			.orderBy(desc(watchlist.score))
 			.limit(10);
-
-		const quoteSummary = [...preFilter.quotes.entries()]
-			.map(([sym, q]) => `${sym}: ${q.last ?? "N/A"}`)
-			.join(", ");
-
-		const recentResearch = await db
-			.select({
-				symbol: research.symbol,
-				action: research.suggestedAction,
-				confidence: research.confidence,
-				sentiment: research.sentiment,
-			})
-			.from(research)
-			.where(gte(research.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()))
-			.orderBy(desc(research.createdAt));
-
-		const pendingOrders = await db
-			.select({
-				id: trades.id,
-				symbol: trades.symbol,
-				side: trades.side,
-				limitPrice: trades.limitPrice,
-				status: trades.status,
-			})
-			.from(trades)
-			.where(eq(trades.status, "SUBMITTED"));
-
-		const currentIntentions = getIntentions();
-		const scanContext = `Notable changes: ${preFilter.reasons.length > 0 ? preFilter.reasons.join("; ") : "None — routine monitoring tick"}
-Positions: ${positionRows.length === 0 ? "None" : JSON.stringify(positionRows.map((p) => ({ symbol: p.symbol, qty: p.quantity, avgCost: p.avgCost, currentPrice: p.currentPrice, pnl: p.unrealizedPnl })))}
-Pending orders: ${pendingOrders.length === 0 ? "None" : JSON.stringify(pendingOrders)}
-Pending intentions: ${currentIntentions.length === 0 ? "None" : JSON.stringify(currentIntentions)}
-Quotes: ${quoteSummary}
-Research signals: ${recentResearch.length === 0 ? "None" : JSON.stringify(recentResearch)}
-Watchlist top scores: ${watchlistItems
-			.slice(0, 5)
-			.map((w) => `${w.symbol}(${w.score})`)
-			.join(", ")}`;
-
-		// === Tier 2: Haiku quick scan (~$0.02) ===
-		const scan = await runQuickScan(scanContext);
-
-		if (!scan.escalate) {
-			log.info({ reason: scan.reason }, "Haiku scan: no escalation needed");
-			const dbForLog = getDb();
-			await dbForLog.insert(agentLogs).values({
-				level: "INFO",
-				phase: "trading",
-				message: `Quick scan: ${scan.reason}`,
-			});
-			return;
-		}
-
-		// === Tier 3: Full Sonnet agent loop ===
-		const sinceLastSonnet = Date.now() - lastSonnetRun;
-		if (sinceLastSonnet < SONNET_COOLDOWN_MS) {
-			const minsLeft = Math.ceil((SONNET_COOLDOWN_MS - sinceLastSonnet) / 60000);
-			log.info({ reason: scan.reason, minsLeft }, "Sonnet cooldown active, skipping escalation");
-			const dbForCooldown = getDb();
-			await dbForCooldown.insert(agentLogs).values({
-				level: "INFO",
-				phase: "trading",
-				message: `Sonnet cooldown (${minsLeft}m left): ${scan.reason}`,
-			});
-			return;
-		}
-
-		log.info({ reason: scan.reason }, "Escalating to full Sonnet analysis");
-		lastSonnetRun = Date.now();
 
 		const recentContext = await buildRecentContext();
 
@@ -488,12 +415,14 @@ Watchlist top scores: ${watchlistItems
 
 		let fullContext: string;
 
+		const notable = preFilter.reasons.length > 0 ? preFilter.reasons.join("; ") : "Routine check";
+
 		if (positionRows.length === 0) {
 			fullContext = `
 Watchlist quotes: ${JSON.stringify(Object.fromEntries(preFilter.quotes))}
 Watchlist data: ${JSON.stringify(watchlistItems)}
 ${recentContext ? `\n${recentContext}` : ""}${enrichmentBlock}
-Escalation reason: ${scan.reason}
+Notable changes: ${notable}
 `;
 		} else {
 			const account = await getAccountSummary();
@@ -508,7 +437,7 @@ Positions with current quotes: ${JSON.stringify(
 				})),
 			)}
 ${recentContext ? `\n${recentContext}` : ""}${enrichmentBlock}
-Escalation reason: ${scan.reason}
+Notable changes: ${notable}
 `;
 		}
 
