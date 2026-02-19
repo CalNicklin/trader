@@ -143,6 +143,22 @@ ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh 
 - [ ] Receiving heartbeat + daily summary emails consistently
 - [ ] No red flags above
 
+## Paper/Live Prompt Duality
+
+All AI prompts are now mode-aware, reading the `PAPER_TRADING` config flag at call time. On the paper account, prompts encourage action (lower confidence thresholds, more escalation triggers) to generate trades for the learning loop. Live mode preserves the original conservative behavior — **live prompts have not been tuned yet** and will be reviewed once the paper approach is validated.
+
+Key files: `src/agent/prompts/trading-mode.ts` (central helper), `src/agent/prompts/quick-scan.ts`, `src/agent/prompts/trading-analyst.ts`, `src/research/analyzer.ts`.
+
+| Aspect | Paper | Live |
+|--------|-------|------|
+| Confidence to act | >= 0.5 | >= 0.7 |
+| Risk/reward | >= 1.5:1 | >= 2:1 |
+| Quick scan escalation | BUY >= 0.5, moves > 1.5% | BUY >= 0.7, moves > 2% |
+| Research analyzer | "Recommend BUY when thesis supported" | "Default to WATCH" |
+| Philosophy | "Take the trade, learning is real" | "No trade > bad trade" |
+
+Note: Code-enforced hard limits (stop losses, position sizing, risk gates) are identical in both modes.
+
 ## What Phase 2 Adds
 
 Phase 2 is purely additive — it makes the agent *smarter* but doesn't change the safety architecture:

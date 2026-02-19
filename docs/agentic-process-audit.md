@@ -1,6 +1,6 @@
 # Agentic Process Flow Audit
 
-> Updated 2026-02-17 (post Phase 1 implementation). Complete audit of every automated process, decision path, and data flow in the Trader Agent platform.
+> Updated 2026-02-19 (post Phase 1 implementation + paper/live prompt duality). Complete audit of every automated process, decision path, and data flow in the Trader Agent platform.
 
 ---
 
@@ -178,7 +178,7 @@ State: idle | pre_market | active_trading | wind_down | post_market | research |
 2. `reconcilePositions()` — sync DB positions with IBKR
 3. Load top 20 watchlist items (by score)
 4. `buildLearningBrief()` — compile last 5 weekly insights + 5 trade review lessons (sorted by severity: critical > warning > info)
-5. Call `runTradingAnalyst(DAY_PLAN_PROMPT)` — Sonnet generates a day plan
+5. Call `runTradingAnalyst(getDayPlanPrompt())` — Sonnet generates a day plan (mode-aware)
 6. **Store day plan in `currentDayPlan` (inter-tick memory)**
 7. Log plan to `agent_logs`
 
@@ -304,27 +304,44 @@ This means the orchestrator is aware of significant moves that happened between 
 
 ### System Prompts
 
-**File:** `src/agent/prompts/trading-analyst.ts`
+**Files:** `src/agent/prompts/trading-analyst.ts`, `src/agent/prompts/quick-scan.ts`, `src/agent/prompts/trading-mode.ts`
 
-| Prompt | Used By | Model | Purpose |
+All trading prompts are **mode-aware** — they read the `PAPER_TRADING` config flag at call time via getter functions and inject paper or live context. The central helper is `getTradingMode()` in `trading-mode.ts`.
+
+| Prompt (getter) | Used By | Model | Purpose |
 |--------|---------|-------|---------|
-| `TRADING_ANALYST_SYSTEM` | Active trading + day plan | Sonnet | Full trading analyst persona |
-| `QUICK_SCAN_SYSTEM` | Tier 2 quick scan | Haiku | Escalation filter |
-| `DAY_PLAN_PROMPT` | Pre-market | Sonnet | Generate daily trading plan |
-| `MINI_ANALYSIS_PROMPT` | Active trading Tier 3 | Sonnet | Analyze and potentially act |
+| `getTradingAnalystSystem()` | Active trading + day plan | Sonnet | Full trading analyst persona (mode-aware) |
+| `getQuickScanSystem()` | Tier 2 quick scan | Haiku | Escalation filter (mode-aware) |
+| `getDayPlanPrompt()` | Pre-market | Sonnet | Generate daily trading plan (mode-aware) |
+| `getMiniAnalysisPrompt()` | Active trading Tier 3 | Sonnet | Analyze and potentially act (mode-aware) |
+| `getAnalysisSystem()` | Research pipeline | Haiku | Stock analysis (mode-aware) |
 | `RISK_REVIEWER_SYSTEM` | Risk review | — | Risk assessment |
 | `SELF_IMPROVEMENT_SYSTEM` | Sunday self-improvement | Sonnet | Propose code changes |
 | `TRADE_REVIEWER_SYSTEM` | Daily trade review | Sonnet | Analyze completed/cancelled trades |
 | `PATTERN_ANALYSIS_PROMPT` | Mid/end-week analysis | Haiku | Identify patterns |
 
-### Key Prompt Rules (TRADING_ANALYST_SYSTEM)
+### Paper vs Live Prompt Behaviour
+
+| Aspect | Paper | Live |
+|--------|-------|------|
+| Philosophy | "Take the trade, learning is real" | "No trade > bad trade" |
+| Confidence to act (prompt) | >= 0.5 | >= 0.7 |
+| Risk/reward (prompt) | >= 1.5:1 | >= 2:1 |
+| Quick scan escalation | BUY >= 0.5, moves > 1.5%, < 3 positions | BUY >= 0.7, moves > 2% |
+| Research analyzer | "Recommend BUY when thesis supported" | "Default to WATCH" |
+| Mini analysis | "Lean towards acting" | "Be conservative" |
+| Day plan | "Aim for 2-3 active positions" | Standard |
+
+**Note:** Live prompts have not been tuned yet — they preserve the original conservative defaults and will be reviewed once the paper approach is validated. Code-enforced hard limits (stop losses, position sizing, risk gates) are identical in both modes.
+
+### Key Prompt Rules (Trading Analyst)
 
 - ISA constraints: long-only, cash-only, GBP/LSE only
-- Trading philosophy: 5–10% profit targets, 3% stop losses
+- Trading philosophy: mode-dependent (see table above)
 - **Always call `get_recent_research` before trading**
 - Research older than 24h → must call `research_symbol` for fresh data
-- Confidence >= 0.7 required to act (enforced in code, not just prompt)
-- Risk/reward ratio >= 2:1
+- Confidence threshold: mode-dependent in prompt, >= 0.7 enforced in code (Gate 2) regardless of mode
+- Risk/reward ratio: mode-dependent in prompt
 - 5-step evaluation: Research → Fundamentals → Technical → Risk → Decision
 
 ### Agent Tools (19 total)
