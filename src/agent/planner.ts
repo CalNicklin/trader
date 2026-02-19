@@ -209,8 +209,18 @@ async function runAgent(
 		}
 	}
 
-	// Hit max iterations
-	log.warn({ maxIterations }, "Agent hit max iterations");
+	// Hit max iterations — still record usage so costs are tracked
+	log.warn(
+		{ maxIterations, tokens: totalInputTokens + totalOutputTokens },
+		"Agent hit max iterations",
+	);
+	await recordUsage(
+		"trading_analyst",
+		totalInputTokens,
+		totalOutputTokens,
+		totalCacheCreationTokens,
+		totalCacheReadTokens,
+	);
 	return {
 		text: "Max iterations reached without final response",
 		toolCalls: allToolCalls,

@@ -9,8 +9,8 @@ const PRICING = {
 	haiku: { input: 1.0, output: 5.0, cacheWrite: 1.25, cacheRead: 0.1 },
 } as const;
 
-// Jobs that use the primary (Opus) model
-const OPUS_JOBS = new Set(["trading_analyst"]);
+// Jobs that use the Opus model (none currently — CLAUDE_MODEL defaults to Sonnet)
+const OPUS_JOBS = new Set<string>([]);
 
 function estimateCost(
 	job: string,
