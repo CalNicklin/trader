@@ -19,6 +19,10 @@ const lastQuotes = new Map<string, number>();
 /** Price move threshold to trigger analysis */
 const PRICE_MOVE_THRESHOLD = 0.02; // 2%
 
+/** Minimum minutes between Sonnet agent runs (cost control) */
+const SONNET_COOLDOWN_MS = 60 * 60 * 1000; // 60 minutes
+let lastSonnetRun = 0;
+
 /** Structured intention logged by the agent via log_intention tool */
 export interface Intention {
 	symbol: string;
@@ -418,8 +422,22 @@ Watchlist top scores: ${watchlistItems
 			return;
 		}
 
-		// === Tier 3: Full Sonnet agent loop (~$1.70) ===
+		// === Tier 3: Full Sonnet agent loop ===
+		const sinceLastSonnet = Date.now() - lastSonnetRun;
+		if (sinceLastSonnet < SONNET_COOLDOWN_MS) {
+			const minsLeft = Math.ceil((SONNET_COOLDOWN_MS - sinceLastSonnet) / 60000);
+			log.info({ reason: scan.reason, minsLeft }, "Sonnet cooldown active, skipping escalation");
+			const dbForCooldown = getDb();
+			await dbForCooldown.insert(agentLogs).values({
+				level: "INFO",
+				phase: "trading",
+				message: `Sonnet cooldown (${minsLeft}m left): ${scan.reason}`,
+			});
+			return;
+		}
+
 		log.info({ reason: scan.reason }, "Escalating to full Sonnet analysis");
+		lastSonnetRun = Date.now();
 
 		const recentContext = await buildRecentContext();
 
