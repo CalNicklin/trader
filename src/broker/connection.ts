@@ -1,4 +1,4 @@
-import { ConnectionState, IBApiNext } from "@stoqey/ib";
+import { ConnectionState, IBApiNext, MarketDataType } from "@stoqey/ib";
 import { getConfig } from "../config.ts";
 import { sendCriticalAlert } from "../utils/alert.ts";
 import { createChildLogger } from "../utils/logger.ts";
@@ -54,6 +54,12 @@ export async function connect(): Promise<IBApiNext> {
 		"IBKR connect",
 		{ maxAttempts: 5, baseDelayMs: 3000 },
 	);
+
+	// Allow delayed data if real-time market data isn't subscribed.
+	// Without this, IBKR returns error 354 for every quote on exchanges
+	// where the account lacks a real-time data subscription.
+	// DELAYED_FROZEN (4): tries real-time → delayed (15-20 min) → frozen.
+	result.setMarketDataType(MarketDataType.DELAYED_FROZEN);
 
 	// Monitor connection state changes
 	_connected = true;
