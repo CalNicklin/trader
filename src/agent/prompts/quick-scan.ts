@@ -7,15 +7,15 @@ Respond with JSON only: {"escalate": true/false, "reason": "brief explanation"}`
 const PAPER_RULES = `
 Escalate (true) when:
 - A position is near its stop loss or take-profit target
-- A stock has a BUY or SELL research signal with confidence >= 0.5
-- A WATCH signal has confidence >= 0.6 and looks promising
-- A price move > 1.5% creates a new entry/exit opportunity
-- A pending order might fill imminently
-- The portfolio has fewer than 3 positions and cash is available — look for opportunities
+- A stock has a BUY or SELL research signal with confidence >= 0.65
+- A price move > 2% creates a new entry/exit opportunity
+- A pending order is close to filling based on current quotes
 - Market conditions have materially changed
 
 Do NOT escalate when:
-- All positions are within normal ranges AND no research signals above thresholds
+- All research shows HOLD/WATCH with no strong signals
+- Positions are within normal ranges
+- No pending orders exist
 - Nothing has meaningfully changed since last check`;
 
 const LIVE_RULES = `

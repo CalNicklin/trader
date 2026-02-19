@@ -2,14 +2,11 @@ import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { startAdminServer, stopAdminServer } from "./admin/server.ts";
 import { getAccountSummary, getPositions } from "./broker/account.ts";
 import { connect, disconnect } from "./broker/connection.ts";
-import { startGuardian, stopGuardian } from "./broker/guardian.ts";
 import { getConfig } from "./config.ts";
 import { closeDb, getDb } from "./db/client.ts";
 import { seedDatabase } from "./db/seed.ts";
 import { startScheduler, stopScheduler } from "./scheduler/cron.ts";
-import { runJobs } from "./scheduler/jobs.ts";
 import { sendCriticalAlert } from "./utils/alert.ts";
-import { getMarketPhase } from "./utils/clock.ts";
 import { getLogger } from "./utils/logger.ts";
 
 const log = getLogger();
@@ -50,51 +47,16 @@ async function boot() {
 		log.info("No open positions");
 	}
 
-	// Start the scheduler, guardian, and admin server
+	// Start the scheduler and admin server
 	startScheduler();
-	startGuardian();
 	startAdminServer();
-	log.info("Scheduler and guardian started - agent is running");
-
-	// G5: Catch-up tick if we restarted during active trading hours
-	await catchUpIfNeeded();
-}
-
-/** If the system restarted mid-session, run a catch-up orchestrator tick */
-async function catchUpIfNeeded(): Promise<void> {
-	try {
-		const phase = getMarketPhase();
-		if (phase !== "open") return; // Only catch up during active trading
-
-		const { desc } = await import("drizzle-orm");
-		const { agentLogs } = await import("./db/schema.ts");
-		const db = getDb();
-
-		const lastLog = await db
-			.select({ createdAt: agentLogs.createdAt })
-			.from(agentLogs)
-			.orderBy(desc(agentLogs.createdAt))
-			.limit(1);
-
-		if (lastLog.length === 0) return;
-
-		const lastLogTime = new Date(lastLog[0]!.createdAt).getTime();
-		const twoHoursMs = 2 * 60 * 60 * 1000;
-
-		if (Date.now() - lastLogTime > twoHoursMs) {
-			log.info("Catch-up tick: last activity was >2h ago during market hours");
-			await runJobs("orchestrator_tick");
-		}
-	} catch (error) {
-		log.warn({ error }, "Catch-up check failed (non-critical)");
-	}
+	log.info("Scheduler started - agent is running");
 }
 
 // Graceful shutdown
 async function shutdown(signal: string) {
 	log.info({ signal }, "Shutting down...");
 	stopAdminServer();
-	stopGuardian();
 	stopScheduler();
 	await disconnect();
 	closeDb();

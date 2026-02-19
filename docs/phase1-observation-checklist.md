@@ -175,23 +175,32 @@ The bar for starting Phase 2 is simply: **Phase 1 is stable and not broken.**
 
 The checklist above is the original baseline. Below are changes made during the first days of observation and how they affect each section.
 
-### Architecture change: Three-tier → Hourly Haiku cron
+### Architecture: Three-tier restored with fixed thresholds (Feb 20)
 
-The original three-tier flow (pre-filter → Haiku quick scan → Sonnet escalation) was replaced on Feb 19 with a simpler architecture:
-- **Hourly Haiku agent loop** runs directly on a `0 8-16 * * 1-5` cron (9 ticks/day)
-- **Sonnet** used only for the 07:30 pre-market day plan (1x/day)
-- Quick scan gate removed entirely — it was always escalating due to paper-mode rules
+The three-tier flow was temporarily described as removed, but the code never changed — `runQuickScan()` was still called from the orchestrator. The actual bugs were:
 
-**Impact on §3 (Three-Tier Architecture Flow):** These checklist items no longer apply as written. The equivalent checks are:
-- Instead of "Pre-filter reasons": check for DECISION-level agent_logs entries appearing hourly
-- Instead of "Haiku scans not escalating": N/A — there's no escalation gate
-- Instead of "Sonnet escalations": check that the 07:30 Sonnet day plan runs once per morning
+1. `runQuickScan()` used a hardcoded live-mode system prompt, ignoring `getQuickScanSystem()` entirely
+2. Paper-mode thresholds in `quick-scan.ts` were too loose (BUY >= 0.5, moves > 1.5%, always-true "< 3 positions" rule)
+
+Both fixed on Feb 20. The three-tier flow is now correctly wired and mode-aware:
+- **Tier 1 (pre-filter):** gathers quotes/positions/research — no AI
+- **Tier 2 (Haiku gate):** decides if Sonnet is needed — paper thresholds: BUY >= 0.65, moves > 2%
+- **Tier 3 (Sonnet agent):** full trading decision with tool use — only when gate escalates
+
+Tick frequency changed from `*/20 7-16` to `*/10 8-16` (10-min ticks, ~54/day during market hours).
+
+**§3 checklist items apply as written.** "Haiku scans not escalating" = most ticks should return `escalate: false`.
 
 ### Cost expectations revised
 
-With £200 real capital, the original $0.50-$3/day range was too broad. The simplified architecture targets **$0.50-$1.50/day** (~$0.90-1.30 projected). The red flag threshold drops from $5/day to **$2/day**.
+With the three-tier architecture restored and 10-min ticks (~54 Haiku scans/day), expected costs are:
+- Haiku scans: ~54/day × $0.02 = ~$1.08/day
+- Sonnet escalations: ~1–3/day × $0.20 = ~$0.20–0.60/day (Sonnet 4.5 not Opus rates)
+- Pre-market Sonnet: ~$0.20/day
 
-**Impact on §6 (Cost Tracking):** Expected ranges are lower. Haiku agent runs cost ~$0.08-0.14 each (not $0.02 scans). Sonnet runs ~$0.15-0.25 once per morning (not $1.70 escalations).
+**Total: ~$1.50–2.00/day during paper trading.** Red flag threshold: **$4/day**.
+
+**Impact on §6 (Cost Tracking):** `token_usage` costs were historically overstated ~3–5× due to wrong model rate lookups (fixed Feb 19 for Sonnet; Haiku still overstated ~3×). Divide DB-reported Haiku costs by ~3 for actual spend.
 
 ### Pence/pounds pricing fix
 

@@ -5,7 +5,7 @@ import { agentLogs } from "../db/schema.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
 import { getQuickScanSystem } from "./prompts/quick-scan.ts";
-import { getTradingAnalystSystem } from "./prompts/trading-analyst.ts";
+import { TRADING_ANALYST_SYSTEM } from "./prompts/trading-analyst.ts";
 import { executeTool, toolDefinitions } from "./tools.ts";
 
 const log = createChildLogger({ module: "agent-planner" });
@@ -71,36 +71,12 @@ export async function runQuickScan(context: string): Promise<QuickScanResult> {
 	}
 }
 
-/** Run the trading analyst agent with tool use (Sonnet — use for day plan) */
+/** Run the trading analyst agent with tool use */
 export async function runTradingAnalyst(
 	userMessage: string,
 	maxIterations: number = 10,
 ): Promise<AgentResponse> {
-	const config = getConfig();
-	return runAgent(
-		getTradingAnalystSystem(),
-		userMessage,
-		toolDefinitions,
-		maxIterations,
-		config.CLAUDE_MODEL,
-		"trading_analyst",
-	);
-}
-
-/** Run the trading analyst agent with Haiku (cheaper — use for active trading ticks) */
-export async function runTradingAnalystFast(
-	userMessage: string,
-	maxIterations: number = 10,
-): Promise<AgentResponse> {
-	const config = getConfig();
-	return runAgent(
-		getTradingAnalystSystem(),
-		userMessage,
-		toolDefinitions,
-		maxIterations,
-		config.CLAUDE_MODEL_STANDARD,
-		"trading_analyst_fast",
-	);
+	return runAgent(TRADING_ANALYST_SYSTEM, userMessage, toolDefinitions, maxIterations);
 }
 
 /** Core agent loop with tool use */
@@ -109,12 +85,9 @@ async function runAgent(
 	userMessage: string,
 	tools: Anthropic.Tool[],
 	maxIterations: number,
-	model?: string,
-	jobName = "trading_analyst",
 ): Promise<AgentResponse> {
 	const client = getClient();
 	const config = getConfig();
-	const resolvedModel = model ?? config.CLAUDE_MODEL;
 	const allToolCalls: AgentResponse["toolCalls"] = [];
 	let totalInputTokens = 0;
 	let totalOutputTokens = 0;
@@ -143,7 +116,7 @@ async function runAgent(
 
 	for (let i = 0; i < maxIterations; i++) {
 		const response = await client.messages.create({
-			model: resolvedModel,
+			model: config.CLAUDE_MODEL,
 			max_tokens: 4096,
 			system,
 			tools: cachedTools,
@@ -221,7 +194,7 @@ async function runAgent(
 			);
 
 			await recordUsage(
-				jobName,
+				"trading_analyst",
 				totalInputTokens,
 				totalOutputTokens,
 				totalCacheCreationTokens,
@@ -236,18 +209,8 @@ async function runAgent(
 		}
 	}
 
-	// Hit max iterations — still record usage so costs are tracked
-	log.warn(
-		{ maxIterations, tokens: totalInputTokens + totalOutputTokens },
-		"Agent hit max iterations",
-	);
-	await recordUsage(
-		"trading_analyst",
-		totalInputTokens,
-		totalOutputTokens,
-		totalCacheCreationTokens,
-		totalCacheReadTokens,
-	);
+	// Hit max iterations
+	log.warn({ maxIterations }, "Agent hit max iterations");
 	return {
 		text: "Max iterations reached without final response",
 		toolCalls: allToolCalls,

@@ -9,9 +9,7 @@ import { research, trades, watchlist } from "../db/schema.ts";
 import { researchSymbol } from "../research/pipeline.ts";
 import { updateScore } from "../research/watchlist.ts";
 import { checkTradeRisk, getMaxPositionSize } from "../risk/manager.ts";
-import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
-import { addIntention, getIntentions, type Intention } from "./orchestrator.ts";
 
 const log = createChildLogger({ module: "agent-tools" });
 
@@ -142,10 +140,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
 				side: { type: "string", enum: ["BUY", "SELL"] },
 				quantity: { type: "number", description: "Number of shares" },
 				orderType: { type: "string", enum: ["LIMIT", "MARKET"] },
-				limitPrice: {
-					type: "number",
-					description: "Limit price in PENCE (required for LIMIT orders). E.g. 5325 for £53.25",
-				},
+				limitPrice: { type: "number", description: "Limit price (required for LIMIT orders)" },
 				reasoning: { type: "string", description: "Explanation of why this trade is being made" },
 				confidence: { type: "number", description: "Confidence level 0.0-1.0" },
 			},
@@ -190,36 +185,6 @@ export const toolDefinitions: Anthropic.Tool[] = [
 			},
 			required: ["message"],
 		},
-	},
-	{
-		name: "log_intention",
-		description:
-			'Log a conditional trading intention for the next tick. Use when you want to remember something across ticks, e.g. "buy SHEL if price drops below 2450". Conditions are evaluated automatically against live quotes each tick.',
-		input_schema: {
-			type: "object" as const,
-			properties: {
-				symbol: { type: "string", description: "Stock ticker symbol" },
-				condition: {
-					type: "string",
-					description:
-						'Price condition in format "price < 2450" or "price > 1200". Supports <, <=, >, >=',
-				},
-				action: {
-					type: "string",
-					description: "What to do when condition is met: BUY, SELL, or RESEARCH",
-				},
-				note: {
-					type: "string",
-					description: "Context for why this intention was set",
-				},
-			},
-			required: ["symbol", "condition", "action", "note"],
-		},
-	},
-	{
-		name: "get_intentions",
-		description: "View all pending trading intentions that are waiting to be triggered",
-		input_schema: { type: "object" as const, properties: {} },
 	},
 ];
 
@@ -307,91 +272,14 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				return JSON.stringify(result);
 			}
 			case "place_trade": {
-				const side = input.side as "BUY" | "SELL";
-				const confidence = input.confidence as number;
-				const symbol = input.symbol as string;
-				const quantity = input.quantity as number;
-				const limitPrice = input.limitPrice as number | undefined;
-				const orderType = input.orderType as "LIMIT" | "MARKET";
-				let estimatedPrice = limitPrice ?? 0;
-
-				// Sanity check: catch pounds-instead-of-pence errors on limit orders
-				if (limitPrice && orderType === "LIMIT") {
-					try {
-						const quote = await getQuote(symbol);
-						const marketPrice = quote.last ?? quote.bid ?? quote.ask ?? 0;
-						if (marketPrice > 0 && limitPrice < marketPrice * 0.1) {
-							log.warn(
-								{ symbol, limitPrice, marketPrice },
-								"Limit price looks like pounds instead of pence",
-							);
-							return JSON.stringify({
-								error: `Limit price ${limitPrice} is >90% below market price ${marketPrice}. All prices must be in PENCE. Did you mean ${Math.round(limitPrice * 100)}?`,
-								rejected: true,
-							});
-						}
-					} catch {
-						// Quote fetch failed — continue without sanity check
-					}
-				}
-
-				// For MARKET orders, fetch current price for risk checks
-				if (!limitPrice) {
-					try {
-						const quote = await getQuote(symbol);
-						estimatedPrice = quote.last ?? quote.bid ?? quote.ask ?? 0;
-					} catch {
-						// Quote fetch failed — estimatedPrice stays 0, risk check will reject
-					}
-				}
-
-				// Gate 1: Wind-down / post-market rejection for BUY orders
-				if (side === "BUY") {
-					const phase = getMarketPhase();
-					if (phase === "wind-down" || phase === "post-market" || phase === "closed") {
-						log.warn({ symbol, phase }, "BUY order rejected — market phase");
-						return JSON.stringify({
-							error: `BUY orders not allowed during ${phase} phase`,
-							rejected: true,
-						});
-					}
-				}
-
-				// Gate 2: Confidence threshold
-				if (confidence < 0.7) {
-					log.warn({ symbol, confidence }, "Trade rejected — confidence below 0.7");
-					return JSON.stringify({
-						error: `Confidence ${confidence} is below minimum threshold of 0.7`,
-						rejected: true,
-					});
-				}
-
-				// Gate 3: Mandatory risk check
-				if (side === "BUY") {
-					const riskResult = await checkTradeRisk({
-						symbol,
-						side,
-						quantity,
-						estimatedPrice,
-					});
-					if (!riskResult.approved) {
-						log.warn({ symbol, reasons: riskResult.reasons }, "Trade rejected by risk gate");
-						return JSON.stringify({
-							error: "Trade rejected by risk manager",
-							reasons: riskResult.reasons,
-							rejected: true,
-						});
-					}
-				}
-
 				const tradeReq: TradeRequest = {
-					symbol,
-					side,
-					quantity,
-					orderType,
-					limitPrice,
+					symbol: input.symbol as string,
+					side: input.side as "BUY" | "SELL",
+					quantity: input.quantity as number,
+					orderType: input.orderType as "LIMIT" | "MARKET",
+					limitPrice: input.limitPrice as number | undefined,
 					reasoning: input.reasoning as string,
-					confidence,
+					confidence: input.confidence as number,
 				};
 				const result = await placeTrade(tradeReq);
 				return JSON.stringify(result);
@@ -444,24 +332,6 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 					phase: "trading",
 				});
 				return JSON.stringify({ logged: true });
-			}
-			case "log_intention": {
-				const intention: Intention = {
-					symbol: (input.symbol as string).toUpperCase(),
-					condition: input.condition as string,
-					action: (input.action as string).toUpperCase(),
-					note: input.note as string,
-					createdAt: new Date().toISOString(),
-				};
-				addIntention(intention);
-				return JSON.stringify({
-					logged: true,
-					intention,
-					pendingCount: getIntentions().length,
-				});
-			}
-			case "get_intentions": {
-				return JSON.stringify(getIntentions());
 			}
 			default:
 				return JSON.stringify({ error: `Unknown tool: ${name}` });
