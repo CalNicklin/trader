@@ -1,5 +1,6 @@
 import { BarSizeSetting, IBApiTickType } from "@stoqey/ib";
 import { getFMPQuotes } from "../research/sources/fmp.ts";
+import { getYahooQuote } from "../research/sources/yahoo-finance.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { getApi } from "./connection.ts";
 import { lseStock } from "./contracts.ts";
@@ -18,8 +19,8 @@ export interface Quote {
 	timestamp: Date;
 }
 
-/** Get a market data snapshot for an LSE symbol */
-export async function getQuote(symbol: string): Promise<Quote> {
+/** Fetch raw IBKR quote (may be real-time or delayed) */
+function getIbkrQuote(symbol: string): Promise<{ quote: Quote; isDelayed: boolean }> {
 	const api = getApi();
 	const contract = lseStock(symbol);
 
@@ -32,9 +33,15 @@ export async function getQuote(symbol: string): Promise<Quote> {
 		const sub = api.getMarketData(contract, "", true, false).subscribe({
 			next: (update) => {
 				const ticks = update.all;
+
+				const rtLast = ticks.get(IBApiTickType.LAST)?.value ?? null;
+				const rtBid = ticks.get(IBApiTickType.BID)?.value ?? null;
+				const hasRealTime = rtLast !== null || rtBid !== null;
+
 				// Read real-time tick, falling back to delayed tick type
 				const tick = (rt: IBApiTickType, delayed: IBApiTickType) =>
 					ticks.get(rt)?.value ?? ticks.get(delayed)?.value ?? null;
+
 				const quote: Quote = {
 					symbol,
 					bid: tick(IBApiTickType.BID, IBApiTickType.DELAYED_BID),
@@ -46,10 +53,10 @@ export async function getQuote(symbol: string): Promise<Quote> {
 					close: tick(IBApiTickType.CLOSE, IBApiTickType.DELAYED_CLOSE),
 					timestamp: new Date(),
 				};
+
 				clearTimeout(timeout);
 				sub.unsubscribe();
-				log.debug({ symbol, last: quote.last, bid: quote.bid, ask: quote.ask }, "Quote fetched");
-				resolve(quote);
+				resolve({ quote, isDelayed: !hasRealTime });
 			},
 			error: (err) => {
 				clearTimeout(timeout);
@@ -57,6 +64,51 @@ export async function getQuote(symbol: string): Promise<Quote> {
 			},
 		});
 	});
+}
+
+/** Try Yahoo Finance for a fresher quote */
+async function getYahooQuoteAsFallback(symbol: string): Promise<Quote | null> {
+	try {
+		const yq = await getYahooQuote(symbol);
+		if (!yq || !yq.price) return null;
+		return {
+			symbol,
+			bid: null,
+			ask: null,
+			last: yq.price,
+			volume: yq.volume,
+			high: yq.fiftyTwoWeekHigh,
+			low: yq.fiftyTwoWeekLow,
+			close: null,
+			timestamp: new Date(),
+		};
+	} catch {
+		return null;
+	}
+}
+
+/** Get a market data snapshot for an LSE symbol.
+ *  Priority: IBKR real-time → Yahoo Finance → IBKR delayed */
+export async function getQuote(symbol: string): Promise<Quote> {
+	// Try IBKR first (real-time or delayed)
+	const ibkr = await getIbkrQuote(symbol);
+
+	// If real-time, use it directly
+	if (!ibkr.isDelayed) {
+		log.debug({ symbol, last: ibkr.quote.last, source: "ibkr-realtime" }, "Quote fetched");
+		return ibkr.quote;
+	}
+
+	// IBKR returned delayed data — try Yahoo for fresher price
+	const yahoo = await getYahooQuoteAsFallback(symbol);
+	if (yahoo) {
+		log.debug({ symbol, last: yahoo.last, source: "yahoo" }, "Quote fetched (Yahoo fallback)");
+		return yahoo;
+	}
+
+	// Yahoo failed — use IBKR delayed data
+	log.debug({ symbol, last: ibkr.quote.last, source: "ibkr-delayed" }, "Quote fetched (delayed)");
+	return ibkr.quote;
 }
 
 /** Get quotes for multiple symbols */
@@ -78,6 +130,7 @@ export async function getQuotes(
 		}
 	}
 
+	// FMP as final fallback for complete IBKR failures (timeout/disconnect)
 	if (failedSymbols.length > 0 && !options?.skipFmpFallback) {
 		try {
 			const fmpQuotes = await getFMPQuotes(failedSymbols);
