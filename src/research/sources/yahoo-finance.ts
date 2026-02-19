@@ -18,6 +18,10 @@ export interface YahooQuoteData {
 	dividend: number | null;
 	fiftyTwoWeekHigh: number;
 	fiftyTwoWeekLow: number;
+	bid: number | null;
+	ask: number | null;
+	dayHigh: number | null;
+	dayLow: number | null;
 }
 
 /** Get quote data from Yahoo Finance for a UK stock */
@@ -42,6 +46,10 @@ export async function getYahooQuote(symbol: string): Promise<YahooQuoteData | nu
 			dividend: quote.quoteType === "EQUITY" ? (quote.dividendYield ?? null) : null,
 			fiftyTwoWeekHigh: quote.fiftyTwoWeekHigh ?? 0,
 			fiftyTwoWeekLow: quote.fiftyTwoWeekLow ?? 0,
+			bid: quote.bid ?? null,
+			ask: quote.ask ?? null,
+			dayHigh: quote.regularMarketDayHigh ?? null,
+			dayLow: quote.regularMarketDayLow ?? null,
 		};
 	} catch (error) {
 		log.error({ symbol, error }, "Yahoo quote fetch failed");

@@ -64,12 +64,12 @@ async function getYahooFallbackQuote(symbol: string): Promise<Quote | null> {
 		if (!yq || !yq.price) return null;
 		return {
 			symbol,
-			bid: null,
-			ask: null,
+			bid: yq.bid,
+			ask: yq.ask,
 			last: yq.price,
 			volume: yq.volume,
-			high: yq.fiftyTwoWeekHigh,
-			low: yq.fiftyTwoWeekLow,
+			high: yq.dayHigh,
+			low: yq.dayLow,
 			close: null,
 			timestamp: new Date(),
 		};
