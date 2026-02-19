@@ -19,8 +19,8 @@ export interface Quote {
 	timestamp: Date;
 }
 
-/** Fetch raw IBKR quote (may be real-time or delayed) */
-function getIbkrQuote(symbol: string): Promise<{ quote: Quote; isDelayed: boolean }> {
+/** Fetch real-time quote from IBKR */
+function getIbkrQuote(symbol: string): Promise<Quote> {
 	const api = getApi();
 	const contract = lseStock(symbol);
 
@@ -33,30 +33,21 @@ function getIbkrQuote(symbol: string): Promise<{ quote: Quote; isDelayed: boolea
 		const sub = api.getMarketData(contract, "", true, false).subscribe({
 			next: (update) => {
 				const ticks = update.all;
-
-				const rtLast = ticks.get(IBApiTickType.LAST)?.value ?? null;
-				const rtBid = ticks.get(IBApiTickType.BID)?.value ?? null;
-				const hasRealTime = rtLast !== null || rtBid !== null;
-
-				// Read real-time tick, falling back to delayed tick type
-				const tick = (rt: IBApiTickType, delayed: IBApiTickType) =>
-					ticks.get(rt)?.value ?? ticks.get(delayed)?.value ?? null;
-
 				const quote: Quote = {
 					symbol,
-					bid: tick(IBApiTickType.BID, IBApiTickType.DELAYED_BID),
-					ask: tick(IBApiTickType.ASK, IBApiTickType.DELAYED_ASK),
-					last: tick(IBApiTickType.LAST, IBApiTickType.DELAYED_LAST),
-					volume: tick(IBApiTickType.VOLUME, IBApiTickType.DELAYED_VOLUME),
-					high: tick(IBApiTickType.HIGH, IBApiTickType.DELAYED_HIGH),
-					low: tick(IBApiTickType.LOW, IBApiTickType.DELAYED_LOW),
-					close: tick(IBApiTickType.CLOSE, IBApiTickType.DELAYED_CLOSE),
+					bid: ticks.get(IBApiTickType.BID)?.value ?? null,
+					ask: ticks.get(IBApiTickType.ASK)?.value ?? null,
+					last: ticks.get(IBApiTickType.LAST)?.value ?? null,
+					volume: ticks.get(IBApiTickType.VOLUME)?.value ?? null,
+					high: ticks.get(IBApiTickType.HIGH)?.value ?? null,
+					low: ticks.get(IBApiTickType.LOW)?.value ?? null,
+					close: ticks.get(IBApiTickType.CLOSE)?.value ?? null,
 					timestamp: new Date(),
 				};
-
 				clearTimeout(timeout);
 				sub.unsubscribe();
-				resolve({ quote, isDelayed: !hasRealTime });
+				log.debug({ symbol, last: quote.last, bid: quote.bid, ask: quote.ask }, "Quote fetched");
+				resolve(quote);
 			},
 			error: (err) => {
 				clearTimeout(timeout);
@@ -66,8 +57,8 @@ function getIbkrQuote(symbol: string): Promise<{ quote: Quote; isDelayed: boolea
 	});
 }
 
-/** Try Yahoo Finance for a fresher quote */
-async function getYahooQuoteAsFallback(symbol: string): Promise<Quote | null> {
+/** Try Yahoo Finance as fallback quote source */
+async function getYahooFallbackQuote(symbol: string): Promise<Quote | null> {
 	try {
 		const yq = await getYahooQuote(symbol);
 		if (!yq || !yq.price) return null;
@@ -88,27 +79,19 @@ async function getYahooQuoteAsFallback(symbol: string): Promise<Quote | null> {
 }
 
 /** Get a market data snapshot for an LSE symbol.
- *  Priority: IBKR real-time → Yahoo Finance → IBKR delayed */
+ *  Priority: IBKR real-time → Yahoo Finance */
 export async function getQuote(symbol: string): Promise<Quote> {
-	// Try IBKR first (real-time or delayed)
-	const ibkr = await getIbkrQuote(symbol);
-
-	// If real-time, use it directly
-	if (!ibkr.isDelayed) {
-		log.debug({ symbol, last: ibkr.quote.last, source: "ibkr-realtime" }, "Quote fetched");
-		return ibkr.quote;
+	try {
+		return await getIbkrQuote(symbol);
+	} catch {
+		// IBKR failed (error 354 / timeout) — try Yahoo
+		const yahoo = await getYahooFallbackQuote(symbol);
+		if (yahoo) {
+			log.info({ symbol, last: yahoo.last }, "Yahoo fallback quote");
+			return yahoo;
+		}
+		throw new Error(`No quote available for ${symbol} (IBKR and Yahoo both failed)`);
 	}
-
-	// IBKR returned delayed data — try Yahoo for fresher price
-	const yahoo = await getYahooQuoteAsFallback(symbol);
-	if (yahoo) {
-		log.debug({ symbol, last: yahoo.last, source: "yahoo" }, "Quote fetched (Yahoo fallback)");
-		return yahoo;
-	}
-
-	// Yahoo failed — use IBKR delayed data
-	log.debug({ symbol, last: ibkr.quote.last, source: "ibkr-delayed" }, "Quote fetched (delayed)");
-	return ibkr.quote;
 }
 
 /** Get quotes for multiple symbols */
@@ -130,7 +113,7 @@ export async function getQuotes(
 		}
 	}
 
-	// FMP as final fallback for complete IBKR failures (timeout/disconnect)
+	// FMP as final fallback when both IBKR and Yahoo fail
 	if (failedSymbols.length > 0 && !options?.skipFmpFallback) {
 		try {
 			const fmpQuotes = await getFMPQuotes(failedSymbols);
