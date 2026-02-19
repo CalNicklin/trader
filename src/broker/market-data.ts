@@ -32,15 +32,18 @@ export async function getQuote(symbol: string): Promise<Quote> {
 		const sub = api.getMarketData(contract, "", true, false).subscribe({
 			next: (update) => {
 				const ticks = update.all;
+				// Read real-time tick, falling back to delayed tick type
+				const tick = (rt: IBApiTickType, delayed: IBApiTickType) =>
+					ticks.get(rt)?.value ?? ticks.get(delayed)?.value ?? null;
 				const quote: Quote = {
 					symbol,
-					bid: ticks.get(IBApiTickType.BID)?.value ?? null,
-					ask: ticks.get(IBApiTickType.ASK)?.value ?? null,
-					last: ticks.get(IBApiTickType.LAST)?.value ?? null,
-					volume: ticks.get(IBApiTickType.VOLUME)?.value ?? null,
-					high: ticks.get(IBApiTickType.HIGH)?.value ?? null,
-					low: ticks.get(IBApiTickType.LOW)?.value ?? null,
-					close: ticks.get(IBApiTickType.CLOSE)?.value ?? null,
+					bid: tick(IBApiTickType.BID, IBApiTickType.DELAYED_BID),
+					ask: tick(IBApiTickType.ASK, IBApiTickType.DELAYED_ASK),
+					last: tick(IBApiTickType.LAST, IBApiTickType.DELAYED_LAST),
+					volume: tick(IBApiTickType.VOLUME, IBApiTickType.DELAYED_VOLUME),
+					high: tick(IBApiTickType.HIGH, IBApiTickType.DELAYED_HIGH),
+					low: tick(IBApiTickType.LOW, IBApiTickType.DELAYED_LOW),
+					close: tick(IBApiTickType.CLOSE, IBApiTickType.DELAYED_CLOSE),
 					timestamp: new Date(),
 				};
 				clearTimeout(timeout);
