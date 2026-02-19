@@ -1,8 +1,9 @@
 # Phase 1 Observation Checklist
 
 **Duration:** 1 week (5 trading days) after deploy
-**Deploy date:** 2026-02-16
-**Earliest Phase 2 start:** 2026-02-23
+**Deploy date:** 2026-02-16 (initial), 2026-02-19 (pence fix + architecture simplification)
+**Observation clock restarts:** 2026-02-20
+**Earliest Phase 2 start:** 2026-02-27
 
 ## 1. Guardian Reliability
 
@@ -44,28 +45,23 @@ ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml l
 - [ ] Volume checks are running (Yahoo quote fetched during risk check)
 - [ ] No persistent "Yahoo Finance quote unavailable" errors
 
-## 3. Three-Tier Architecture Flow
+## 3. Trading Agent Flow
 
-### Pre-filter reasons
-```bash
-ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml logs trader --no-color | grep -i 'Pre-filter'"
-```
-- [ ] Pre-filter is generating reasons (positions to monitor, price moves, research signals)
-- [ ] Not every tick is empty — at least some notable changes detected
+Architecture simplified on 2026-02-19: Haiku agent loop runs directly on an hourly cron (no quick scan gate). Sonnet used only for pre-market day plan.
 
-### Haiku scans
+### Hourly Haiku ticks
 ```bash
-ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh -c "apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/trader.db \"SELECT message, created_at FROM agent_logs WHERE message LIKE '"'"'%Quick scan%'"'"' ORDER BY created_at DESC LIMIT 10\""'
+ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh -c "apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/trader.db \"SELECT created_at, substr(message, 1, 120) FROM agent_logs WHERE level = '"'"'DECISION'"'"' ORDER BY created_at DESC LIMIT 10\""'
 ```
-- [ ] Haiku scans are running regularly
-- [ ] Most scans are *not* escalating (cost control working)
+- [ ] DECISION entries appearing roughly hourly during market hours
+- [ ] Agent is making coherent trading decisions (not looping or erroring)
 
-### Sonnet escalations
+### Order correctness (pence fix)
 ```bash
-ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml logs trader --no-color | grep -i 'Escalating to full Sonnet'"
+ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh -c "apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/trader.db \"SELECT symbol, side, limit_price, status, created_at FROM trades ORDER BY created_at DESC LIMIT 10\""'
 ```
-- [ ] At least a few Sonnet escalations over the week (system isn't dead)
-- [ ] Not escalating every single tick (would indicate Haiku scan is broken)
+- [ ] Limit prices are in pence (e.g. 2250, not 22.50)
+- [ ] At least one order has status FILLED (not all cancelled)
 
 ## 4. Operational Fixes
 
@@ -117,9 +113,9 @@ ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml p
 ```bash
 ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh -c "apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/trader.db \"SELECT job, ROUND(SUM(estimated_cost_usd), 3) as cost, COUNT(*) as calls FROM token_usage WHERE created_at > date('"'"'now'"'"', '"'"'-7 days'"'"') GROUP BY job ORDER BY cost DESC\""'
 ```
-- [ ] Daily cost is roughly $0.50-$3 (depends on escalation frequency)
-- [ ] Haiku scans are cheap (~$0.02 each)
-- [ ] Sonnet escalations are the main cost driver (~$1.70 each)
+- [ ] Daily cost is roughly $0.50-$1.50
+- [ ] `trading_analyst_fast` (Haiku) runs are ~$0.08-0.14 each
+- [ ] `trading_analyst` (Sonnet, day plan only) is ~$0.15-0.25 once per morning
 - [ ] No single job is unexpectedly expensive
 
 ---
@@ -129,7 +125,7 @@ ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh 
 - Guardian crashing or not updating prices
 - Risk gates never reached (code path dead)
 - Repeated boot failures or rejection storms
-- Cost runaway (>$5/day consistently)
+- Cost runaway (>$2/day consistently)
 - Daily summary emails not arriving
 - Persistent Yahoo Finance or IBKR connection errors
 
@@ -138,8 +134,9 @@ ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh 
 - [ ] 5 clean weekdays with no crashes
 - [ ] Guardian reliably updating prices
 - [ ] At least one post-market cleanup logged
-- [ ] Haiku scans running + at least one Sonnet escalation
-- [ ] Daily cost within expected range ($0.50-$3)
+- [ ] Hourly Haiku agent ticks running + Sonnet day plan at 07:30
+- [ ] At least one filled trade during the observation week
+- [ ] Daily cost within expected range ($0.50-$1.50)
 - [ ] Receiving heartbeat + daily summary emails consistently
 - [ ] No red flags above
 
@@ -153,7 +150,7 @@ Key files: `src/agent/prompts/trading-mode.ts` (central helper), `src/agent/prom
 |--------|-------|------|
 | Confidence to act | >= 0.5 | >= 0.7 |
 | Risk/reward | >= 1.5:1 | >= 2:1 |
-| Quick scan escalation | BUY >= 0.5, moves > 1.5% | BUY >= 0.7, moves > 2% |
+| Quick scan escalation | Removed (hourly cron) | Removed (hourly cron) |
 | Research analyzer | "Recommend BUY when thesis supported" | "Default to WATCH" |
 | Philosophy | "Take the trade, learning is real" | "No trade > bad trade" |
 
