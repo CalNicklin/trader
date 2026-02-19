@@ -11,6 +11,12 @@ You analyze market data, research, and portfolio state to make trading decisions
 - GBP denominated, LSE-listed equities only
 - No derivatives, no CFDs
 
+## CRITICAL: All Prices Are in PENCE
+All quotes, historical bars, and research prices are in **pence** (GBp), NOT pounds.
+- ULVR at 5325 means 5325p (£53.25)
+- GSK at 2250 means 2250p (£22.50)
+When placing limit orders, use **pence**. A limit price of 53.5 means 53.5 pence, not £53.50.
+
 {TRADING_MODE}
 
 ## Available Tools

@@ -142,7 +142,10 @@ export const toolDefinitions: Anthropic.Tool[] = [
 				side: { type: "string", enum: ["BUY", "SELL"] },
 				quantity: { type: "number", description: "Number of shares" },
 				orderType: { type: "string", enum: ["LIMIT", "MARKET"] },
-				limitPrice: { type: "number", description: "Limit price (required for LIMIT orders)" },
+				limitPrice: {
+					type: "number",
+					description: "Limit price in PENCE (required for LIMIT orders). E.g. 5325 for £53.25",
+				},
 				reasoning: { type: "string", description: "Explanation of why this trade is being made" },
 				confidence: { type: "number", description: "Confidence level 0.0-1.0" },
 			},
@@ -311,6 +314,26 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				const limitPrice = input.limitPrice as number | undefined;
 				const orderType = input.orderType as "LIMIT" | "MARKET";
 				let estimatedPrice = limitPrice ?? 0;
+
+				// Sanity check: catch pounds-instead-of-pence errors on limit orders
+				if (limitPrice && orderType === "LIMIT") {
+					try {
+						const quote = await getQuote(symbol);
+						const marketPrice = quote.last ?? quote.bid ?? quote.ask ?? 0;
+						if (marketPrice > 0 && limitPrice < marketPrice * 0.1) {
+							log.warn(
+								{ symbol, limitPrice, marketPrice },
+								"Limit price looks like pounds instead of pence",
+							);
+							return JSON.stringify({
+								error: `Limit price ${limitPrice} is >90% below market price ${marketPrice}. All prices must be in PENCE. Did you mean ${Math.round(limitPrice * 100)}?`,
+								rejected: true,
+							});
+						}
+					} catch {
+						// Quote fetch failed — continue without sanity check
+					}
+				}
 
 				// For MARKET orders, fetch current price for risk checks
 				if (!limitPrice) {
