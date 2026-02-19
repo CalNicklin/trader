@@ -310,7 +310,17 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				const quantity = input.quantity as number;
 				const limitPrice = input.limitPrice as number | undefined;
 				const orderType = input.orderType as "LIMIT" | "MARKET";
-				const estimatedPrice = limitPrice ?? 0;
+				let estimatedPrice = limitPrice ?? 0;
+
+				// For MARKET orders, fetch current price for risk checks
+				if (!limitPrice) {
+					try {
+						const quote = await getQuote(symbol);
+						estimatedPrice = quote.last ?? quote.bid ?? quote.ask ?? 0;
+					} catch {
+						// Quote fetch failed — estimatedPrice stays 0, risk check will reject
+					}
+				}
 
 				// Gate 1: Wind-down / post-market rejection for BUY orders
 				if (side === "BUY") {
