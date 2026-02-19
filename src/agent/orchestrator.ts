@@ -9,7 +9,7 @@ import { buildLearningBrief, buildRecentContext } from "../learning/context-buil
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { runQuickScan, runTradingAnalyst } from "./planner.ts";
-import { DAY_PLAN_PROMPT, MINI_ANALYSIS_PROMPT } from "./prompts/trading-analyst.ts";
+import { getDayPlanPrompt, getMiniAnalysisPrompt } from "./prompts/trading-analyst.ts";
 
 const log = createChildLogger({ module: "orchestrator" });
 
@@ -230,7 +230,7 @@ Date: ${new Date().toISOString()}
 ${learningBrief ? `\n${learningBrief}` : ""}
 `;
 
-		const response = await runTradingAnalyst(`${DAY_PLAN_PROMPT}\n\n${context}`);
+		const response = await runTradingAnalyst(`${getDayPlanPrompt()}\n\n${context}`);
 		currentDayPlan = response.text;
 		log.info({ plan: response.text.substring(0, 200) }, "Day plan generated");
 	} catch (error) {
@@ -494,7 +494,7 @@ Escalation reason: ${scan.reason}
 `;
 		}
 
-		const agentResponse = await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${fullContext}`);
+		const agentResponse = await runTradingAnalyst(`${getMiniAnalysisPrompt()}\n\n${fullContext}`);
 		lastAgentResponse = agentResponse.text;
 	} catch (error) {
 		log.error({ error }, "Active trading tick failed");

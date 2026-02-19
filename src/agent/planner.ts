@@ -4,7 +4,8 @@ import { getDb } from "../db/client.ts";
 import { agentLogs } from "../db/schema.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
-import { TRADING_ANALYST_SYSTEM } from "./prompts/trading-analyst.ts";
+import { getQuickScanSystem } from "./prompts/quick-scan.ts";
+import { getTradingAnalystSystem } from "./prompts/trading-analyst.ts";
 import { executeTool, toolDefinitions } from "./tools.ts";
 
 const log = createChildLogger({ module: "agent-planner" });
@@ -29,23 +30,6 @@ export interface QuickScanResult {
 	reason: string;
 }
 
-const QUICK_SCAN_SYSTEM = `You are a trading desk assistant performing a quick market scan. You receive a summary of current portfolio state, quotes, and research. Your ONLY job is to decide if a full trading analysis is needed right now.
-
-Respond with JSON only: {"escalate": true/false, "reason": "brief explanation"}
-
-Escalate (true) when:
-- A position is near its stop loss or take-profit target
-- A stock has a BUY or SELL research signal with high confidence (>=0.7)
-- A significant price move (>2%) creates a new entry/exit opportunity
-- A pending order might fill imminently
-- Market conditions have materially changed
-
-Do NOT escalate when:
-- All research shows HOLD/WATCH with no strong signals
-- Positions are within normal ranges
-- No pending orders exist
-- Nothing has meaningfully changed since last check`;
-
 /** Tier 2: Single Haiku call to decide if full Sonnet analysis is needed */
 export async function runQuickScan(context: string): Promise<QuickScanResult> {
 	const client = getClient();
@@ -55,7 +39,7 @@ export async function runQuickScan(context: string): Promise<QuickScanResult> {
 		const response = await client.messages.create({
 			model: config.CLAUDE_MODEL_FAST,
 			max_tokens: 256,
-			system: QUICK_SCAN_SYSTEM,
+			system: getQuickScanSystem(),
 			messages: [{ role: "user", content: context }],
 		});
 
@@ -92,7 +76,7 @@ export async function runTradingAnalyst(
 	userMessage: string,
 	maxIterations: number = 10,
 ): Promise<AgentResponse> {
-	return runAgent(TRADING_ANALYST_SYSTEM, userMessage, toolDefinitions, maxIterations);
+	return runAgent(getTradingAnalystSystem(), userMessage, toolDefinitions, maxIterations);
 }
 
 /** Core agent loop with tool use */

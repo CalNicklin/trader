@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { getTradingMode } from "../agent/prompts/trading-mode.ts";
 import { getConfig } from "../config.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
@@ -23,7 +24,7 @@ export interface AnalysisResult {
 	analysis: string;
 }
 
-const ANALYSIS_SYSTEM = `You are a stock analyst specializing in LSE-listed UK equities. Analyze the provided data and give a clear, structured assessment.
+const ANALYSIS_BASE = `You are a stock analyst specializing in LSE-listed UK equities. Analyze the provided data and give a clear, structured assessment.
 
 Always respond in valid JSON with these fields:
 - sentiment: number from -1 (very bearish) to 1 (very bullish)
@@ -31,9 +32,15 @@ Always respond in valid JSON with these fields:
 - confidence: number from 0 to 1
 - bullCase: string (max 200 chars)
 - bearCase: string (max 200 chars)
-- analysis: string (max 500 chars)
+- analysis: string (max 500 chars)`;
 
-Be conservative. Default to WATCH unless there's a compelling case.`;
+const PAPER_SUFFIX =
+	"\n\nAssess objectively. Recommend BUY when the thesis is supported by fundamentals or technicals — do not default to WATCH out of caution. This is a paper account generating data for a learning loop.";
+const LIVE_SUFFIX = "\n\nBe conservative. Default to WATCH unless there's a compelling case.";
+
+function getAnalysisSystem(): string {
+	return ANALYSIS_BASE + (getTradingMode() === "paper" ? PAPER_SUFFIX : LIVE_SUFFIX);
+}
 
 /** Analyze a stock using Claude */
 export async function analyzeStock(
@@ -61,7 +68,7 @@ Provide your analysis as JSON.`;
 		const response = await client.messages.create({
 			model: config.CLAUDE_MODEL_STANDARD,
 			max_tokens: 1024,
-			system: [{ type: "text", text: ANALYSIS_SYSTEM, cache_control: { type: "ephemeral" } }],
+			system: [{ type: "text", text: getAnalysisSystem(), cache_control: { type: "ephemeral" } }],
 			messages: [{ role: "user", content: prompt }],
 		});
 
