@@ -8,7 +8,7 @@ import { agentLogs, dailySnapshots, positions, research, trades, watchlist } fro
 import { buildLearningBrief, buildRecentContext } from "../learning/context-builder.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
-import { runQuickScan, runTradingAnalyst } from "./planner.ts";
+import { runQuickScan, runTradingAnalyst, runTradingAnalystFast } from "./planner.ts";
 import { getDayPlanPrompt, getMiniAnalysisPrompt } from "./prompts/trading-analyst.ts";
 
 const log = createChildLogger({ module: "orchestrator" });
@@ -512,7 +512,9 @@ Escalation reason: ${scan.reason}
 `;
 		}
 
-		const agentResponse = await runTradingAnalyst(`${getMiniAnalysisPrompt()}\n\n${fullContext}`);
+		const agentResponse = await runTradingAnalystFast(
+			`${getMiniAnalysisPrompt()}\n\n${fullContext}`,
+		);
 		lastAgentResponse = agentResponse.text;
 	} catch (error) {
 		log.error({ error }, "Active trading tick failed");

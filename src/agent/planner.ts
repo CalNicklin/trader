@@ -71,12 +71,36 @@ export async function runQuickScan(context: string): Promise<QuickScanResult> {
 	}
 }
 
-/** Run the trading analyst agent with tool use */
+/** Run the trading analyst agent with tool use (Sonnet — use for day plan) */
 export async function runTradingAnalyst(
 	userMessage: string,
 	maxIterations: number = 10,
 ): Promise<AgentResponse> {
-	return runAgent(getTradingAnalystSystem(), userMessage, toolDefinitions, maxIterations);
+	const config = getConfig();
+	return runAgent(
+		getTradingAnalystSystem(),
+		userMessage,
+		toolDefinitions,
+		maxIterations,
+		config.CLAUDE_MODEL,
+		"trading_analyst",
+	);
+}
+
+/** Run the trading analyst agent with Haiku (cheaper — use for active trading ticks) */
+export async function runTradingAnalystFast(
+	userMessage: string,
+	maxIterations: number = 10,
+): Promise<AgentResponse> {
+	const config = getConfig();
+	return runAgent(
+		getTradingAnalystSystem(),
+		userMessage,
+		toolDefinitions,
+		maxIterations,
+		config.CLAUDE_MODEL_STANDARD,
+		"trading_analyst_fast",
+	);
 }
 
 /** Core agent loop with tool use */
@@ -85,9 +109,12 @@ async function runAgent(
 	userMessage: string,
 	tools: Anthropic.Tool[],
 	maxIterations: number,
+	model?: string,
+	jobName = "trading_analyst",
 ): Promise<AgentResponse> {
 	const client = getClient();
 	const config = getConfig();
+	const resolvedModel = model ?? config.CLAUDE_MODEL;
 	const allToolCalls: AgentResponse["toolCalls"] = [];
 	let totalInputTokens = 0;
 	let totalOutputTokens = 0;
@@ -116,7 +143,7 @@ async function runAgent(
 
 	for (let i = 0; i < maxIterations; i++) {
 		const response = await client.messages.create({
-			model: config.CLAUDE_MODEL,
+			model: resolvedModel,
 			max_tokens: 4096,
 			system,
 			tools: cachedTools,
@@ -194,7 +221,7 @@ async function runAgent(
 			);
 
 			await recordUsage(
-				"trading_analyst",
+				jobName,
 				totalInputTokens,
 				totalOutputTokens,
 				totalCacheCreationTokens,
