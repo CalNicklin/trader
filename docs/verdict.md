@@ -224,7 +224,7 @@ The goals are not equally important. There's a dependency chain:
                      │ FOUNDATION (Gap Resolution Plan)  │
                      │ Risk enforcement, stop losses,    │
                      │ operational reliability            │
-                     │ Status: Planned, ready to build   │
+                     │ Status: Deployed 2026-02-20       │
                      └──────────────┬───────────────────┘
                                     │
                      ┌──────────────▼───────────────────┐
@@ -253,13 +253,11 @@ The goals are not equally important. There's a dependency chain:
                      └─────────────────────────────────┘
 ```
 
-### Phase 1: Foundation (Gap Resolution Plan)
+### Phase 1: Foundation (Gap Resolution Plan) — DEPLOYED
 
-What: Implement all 29 fixes from the gap resolution plan.
-Why: Can't trade safely without enforced risk checks and stop losses.
-Cost: ~$1.50/month additional.
-Effort: Medium. Mostly wiring up existing code.
-**This is table stakes. Do this first.**
+Deployed 2026-02-20. All safety-critical gaps resolved: trade gates (confidence, market phase, risk pipeline), Guardian wiring (stop-loss enforcement, price updates), Wilson score auto-pause, context enrichments (day plan, inter-tick memory, portfolio composition, data completeness), intentions system, catch-up tick, and snapshot retry. 26 tests covering critical paths.
+
+Observation period runs until Feb 27 minimum. See `phase1-observation-checklist.md`.
 
 ### Phase 2: Trading Intelligence
 

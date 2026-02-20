@@ -11,13 +11,13 @@
 
 ---
 
-## Phase 1: Foundation
+## Phase 1: Foundation — COMPLETE
 
 **Goal:** Make the system safe and operationally reliable.
-**Estimated effort:** 2–3 sessions.
-**Deploy, then observe for 1 trading week before Phase 2.**
+**Deployed:** 2026-02-20 (commit `51747de`). 17 files, 740 insertions, 26 new tests.
+**Observation period:** Feb 20–27 minimum. See `phase1-observation-checklist.md`.
 
-### Step 1.1 — Enforce risk check inside `place_trade`
+### Step 1.1 — Enforce risk check inside `place_trade` ✓
 
 **Gaps:** D1 (risk check not enforced), A2 (confidence threshold), A5 (wind-down rejection)
 
@@ -35,7 +35,7 @@
 
 ---
 
-### Step 1.2 — Wire sector exposure and volume into risk pipeline
+### Step 1.2 — Wire sector exposure and volume into risk pipeline ✓
 
 **Gaps:** D3 (sector exposure), D4 (volume check)
 
@@ -56,7 +56,7 @@
 
 ---
 
-### Step 1.3 — Position Guardian
+### Step 1.3 — Position Guardian ✓
 
 **Gaps:** A4 (stop-loss execution), B3 (event-driven triggers), C1 (fill tracking), C2 (unfilled order cleanup), G3 (stale positions), H1 (real-time P&L)
 
@@ -77,7 +77,7 @@
 
 ---
 
-### Step 1.4 — `log_intention` tool
+### Step 1.4 — `log_intention` tool ✓
 
 **Gap:** A1 (track unfulfilled intentions)
 
@@ -98,7 +98,7 @@
 
 ---
 
-### Step 1.5 — Context enrichments
+### Step 1.5 — Context enrichments ✓
 
 **Gaps:** A3 (day plan memory), H3 (inter-tick memory), B4 (data completeness), H2 (portfolio composition)
 
@@ -117,9 +117,11 @@
 
 ---
 
-### Step 1.6 — Operational fixes
+### Step 1.6 — Operational fixes (partially complete)
 
 **Gaps:** D2 (snapshot retry), F1 (review cancelled orders), F2 (lower pattern minimum), F3 (PR staleness alerts), F4 (severity-weighted brief), F5 (Wilson score pause), G2 (heartbeat), G5 (missed job backfill), E2 (dynamic news matching), E4 (research data quality), E5 (score decay), E3 (research priority), G4 (cost tracking accuracy)
+
+**Implemented in this batch:** D2 (snapshot retry ✓), F5 (Wilson score ✓), G5 (catch-up tick ✓). Remaining items (F1, F2, F3, F4, G4, E2, E4, E5, E3) were previously implemented or are deferred to observation — see `agentic-process-audit.md` Section 14 for full status.
 
 **Files:** Multiple — each is a small, independent edit.
 

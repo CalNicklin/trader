@@ -171,7 +171,7 @@ The bar for starting Phase 2 is simply: **Phase 1 is stable and not broken.**
 
 ---
 
-## Divergences from Original Plan (as of 2026-02-19, may need updating)
+## Divergences from Original Plan (updated 2026-02-20)
 
 The checklist above is the original baseline. Below are changes made during the first days of observation and how they affect each section.
 
@@ -206,9 +206,13 @@ With the three-tier architecture restored and 10-min ticks (~54 Haiku scans/day)
 
 All 12 orders placed Feb 16-19 failed because the agent used pounds instead of pence for limit prices. Fixed on Feb 19 with prompt changes + runtime sanity check. This adds an implicit Phase 1 success criterion: **at least one order must fill at the correct pence price**.
 
+### Phase 1 gap closure deployed (Feb 20)
+
+Trade gates (confidence, market phase, risk pipeline), Guardian wiring (stop-loss enforcement via MARKET SELL, price updates), Wilson score auto-pause, context enrichments (day plan, inter-tick memory, portfolio composition, data completeness), intentions system (`log_intention` tool + per-tick evaluation), catch-up tick on restart, and snapshot retry — all deployed in commit `51747de` with 26 tests.
+
 ### Observation clock
 
-The original plan assumed a clean start from Feb 16. Due to the architecture change and pence fix (both fundamental), the observation clock effectively restarts from **Feb 20**. Earliest Phase 2 start: **Feb 27**.
+The original plan assumed a clean start from Feb 16. Due to architecture changes, pence fix, and Phase 1 gap closure (all fundamental), the observation clock restarts from **Feb 20**. Earliest Phase 2 start: **Feb 27**.
 
 ### Yahoo Finance fallback fix
 

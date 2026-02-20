@@ -1,6 +1,8 @@
 # Goals vs Reality Analysis
 
-> Generated 2026-02-16. Maps the stated project goals against current system capabilities and the gap resolution plan. Identifies what's covered, what's partially addressed, and what's missing entirely.
+> Generated 2026-02-16. Updated 2026-02-20 (Phase 1 deployed).
+>
+> Maps the stated project goals against current system capabilities and the gap resolution plan. Identifies what's covered, what's partially addressed, and what's missing entirely.
 
 ---
 
@@ -93,15 +95,13 @@
 
 | Aspect               | Status               | Detail                                                                                                   |
 | -------------------- | -------------------- | -------------------------------------------------------------------------------------------------------- |
-| Symbol exclusions    | Working              | Checked during research discovery                                                                        |
-| Sector exclusions    | Working              | Checked during research discovery                                                                        |
-| Risk limits defined  | Working              | 12 hard limits in `HARD_LIMITS`                                                                          |
-| Risk limits enforced | **Partially broken** | D1 (risk check not enforced in `place_trade`), D3 (sector exposure not checked), D4 (volume not checked) |
-| Stop-loss execution  | **Missing**          | A4 — stops exist in DB but nothing sells when breached                                                   |
+| Symbol exclusions    | Working     | Checked during research discovery                                                                        |
+| Sector exclusions    | Working     | Checked during research discovery                                                                        |
+| Risk limits defined  | Working     | 12 hard limits in `HARD_LIMITS`                                                                          |
+| Risk limits enforced | **Fixed**   | D1, D3, D4 all deployed Feb 20 — risk check mandatory inside `place_trade`, sector + volume enforced     |
+| Stop-loss execution  | **Fixed**   | A4 — Guardian runs every 60s, places MARKET SELL when price breaches stop-loss                            |
 
-**Gap plan coverage:** Excellent. D1, D3, D4, A2, A5 wire up all missing enforcement. Position Guardian handles stop-loss execution. This is the strongest section of the plan.
-
-**What's needed after plan:** Nothing significant. The plan fully addresses this goal.
+**Status:** All gaps resolved and deployed (Feb 20). Trade gates enforce confidence >= 0.7, market phase, and full risk pipeline before any BUY order reaches IBKR.
 
 ---
 
@@ -185,17 +185,17 @@ This would be cheaper than the current single-Sonnet loop (two cheap Haiku calls
 
 ## Summary Matrix
 
-| Goal                        | Current     | After Gap Plan    | Remaining Gap                                           |
-| --------------------------- | ----------- | ----------------- | ------------------------------------------------------- |
-| 1. Learning from decisions  | Partial     | Improved          | Learning from inaction, missed opportunities            |
-| 2. Strategy evolution       | Weak        | Slightly improved | No quantitative strategy, no strategy journal           |
-| 3. Weekly self-modification | Working     | Working + alerts  | Scope narrow (by design for now)                        |
-| 4. Active research          | Good        | Better            | No intraday news, no events calendar, no macro          |
-| 5. Risk and exclusions      | Broken      | **Fully fixed**   | None                                                    |
-| 6. Cost efficiency          | Good        | Better            | Agent not cost-aware                                    |
-| 7. Paper → live transition  | Not planned | Not planned       | No criteria, no checklist, no recalibration             |
-| 8. Agentic architecture     | Basic       | Basic             | No multi-agent pattern, no self-reflection              |
-| 9. Expert trading           | **Weak**    | **Weak**          | No indicators, no quantitative methods, beginner prompt |
+| Goal                        | Pre-Phase 1 | Post-Phase 1 (Feb 20) | Remaining Gap                                           |
+| --------------------------- | ----------- | --------------------- | ------------------------------------------------------- |
+| 1. Learning from decisions  | Partial     | Improved              | Learning from inaction, missed opportunities            |
+| 2. Strategy evolution       | Weak        | Slightly improved     | No quantitative strategy, no strategy journal           |
+| 3. Weekly self-modification | Working     | Working + alerts      | Scope narrow (by design for now)                        |
+| 4. Active research          | Good        | Better                | No intraday news, no events calendar, no macro          |
+| 5. Risk and exclusions      | Broken      | **Fixed**             | None                                                    |
+| 6. Cost efficiency          | Good        | Better                | Agent not cost-aware                                    |
+| 7. Paper → live transition  | Not planned | Not planned           | No criteria, no checklist, no recalibration             |
+| 8. Agentic architecture     | Basic       | Basic                 | No multi-agent pattern, no self-reflection              |
+| 9. Expert trading           | **Weak**    | **Weak**              | No indicators, no quantitative methods, beginner prompt |
 
 ## Priority Actions Beyond the Gap Plan
 

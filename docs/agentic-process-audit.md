@@ -1,6 +1,6 @@
 # Agentic Process Flow Audit
 
-> Updated 2026-02-19 (post Phase 1 implementation + paper/live prompt duality). Complete audit of every automated process, decision path, and data flow in the Trader Agent platform.
+> Updated 2026-02-20 (Phase 1 gap closure deployed, tick frequency corrected to 10-min). Complete audit of every automated process, decision path, and data flow in the Trader Agent platform.
 
 ---
 
@@ -98,8 +98,7 @@ All times **Europe/London**. Weekdays only unless noted.
 |------|-----|-------------|--------------|
 | **07:00** | `heartbeat` | `0 7 * * 1-5` | Sends alive-confirmation email with hostname and uptime |
 | **07:30** | `pre_market` | `30 7 * * 1-5` | Sync account, reconcile positions, generate day plan via Sonnet |
-| **08:00–15:59** | `orchestrator_tick` | `*/20 8-15 * * 1-5` | Three-tier analysis: pre-filter → Haiku scan → Sonnet agent |
-| **16:00, 16:20** | `orchestrator_tick` | `0,20 16 * * 1-5` | Final ticks before wind-down |
+| **08:00–16:50** | `orchestrator_tick` | `*/10 8-16 * * 1-5` | Three-tier analysis: pre-filter → Haiku scan → Sonnet agent |
 | **16:35** | `post_market` | `35 16 * * 1-5` | Reconcile positions, record daily snapshot, clear intentions |
 | **17:00** | `daily_summary` | `0 17 * * 1-5` | Email daily performance report (includes stale PR alerts) |
 | **17:15** | `trade_review` | `15 17 * * 1-5` | Claude reviews each filled, cancelled, and expired trade |
@@ -119,7 +118,7 @@ All times **Europe/London**. Weekdays only unless noted.
            │              Positions reconciled
            │              Day plan stored in memory for later ticks
 08:00      ┌─ MARKET OPEN ────────────────────────────────────────┐
-08:00      │  orchestrator_tick (every 20 min)                     │
+08:00      │  orchestrator_tick (every 10 min)                     │
 08:20      │  orchestrator_tick                                    │
 08:40      │  orchestrator_tick                                    │
   ...      │  ...                                                  │
@@ -129,6 +128,7 @@ All times **Europe/London**. Weekdays only unless noted.
            │    - Price alert accumulator (>3% moves)              │
            │                                                       │
 16:00      │  orchestrator_tick                                    │
+16:10      │  orchestrator_tick                                    │
 16:20      │  orchestrator_tick (last before wind-down)            │
 16:25      │  WIND-DOWN — no new BUY orders (enforced in code)    │
 16:30      └─ MARKET CLOSE ───────────────────────────────────────┘
@@ -182,7 +182,7 @@ State: idle | pre_market | active_trading | wind_down | post_market | research |
 6. **Store day plan in `currentDayPlan` (inter-tick memory)**
 7. Log plan to `agent_logs`
 
-**`onActiveTradingTick()`** — Runs every 20 min during market hours
+**`onActiveTradingTick()`** — Runs every 10 min during market hours
 → See [Section 5: Three-Tier Decision Architecture](#5-three-tier-decision-architecture)
 
 **`onWindDown()`** — 16:25–16:30
@@ -201,7 +201,7 @@ State: idle | pre_market | active_trading | wind_down | post_market | research |
 
 ### Inter-Tick Memory
 
-The orchestrator maintains three pieces of state across 20-minute ticks:
+The orchestrator maintains three pieces of state across 10-minute ticks:
 
 | Memory | Set By | Used By | Cleared |
 |--------|--------|---------|---------|
@@ -216,7 +216,7 @@ The orchestrator maintains three pieces of state across 20-minute ticks:
 **Purpose:** Cut Claude API costs ~95% by filtering out routine ticks before invoking expensive models.
 
 ```
-Every 20 min during market hours:
+Every 10 min during market hours:
 
 ┌──────────────────────────────────────────────────────────────┐
 │ TIER 1: Code Pre-Filter (FREE)                               │
@@ -283,18 +283,18 @@ Guardian (every 60s):
   - Fetches quotes for all positions + top 10 watchlist
   - Detects >3% price moves → pushes to alertQueue[]
 
-Orchestrator (every 20 min):
+Orchestrator (every 10 min):
   - Tier 1 calls drainAlerts() → consumes all queued alerts
   - Alerts become escalation reasons for Haiku
 ```
 
-This means the orchestrator is aware of significant moves that happened between its 20-minute ticks, even though it only runs periodically.
+This means the orchestrator is aware of significant moves that happened between its 10-minute ticks, even though it only runs periodically.
 
 ### Cost Model
 
 | Scenario | Daily Cost | Monthly Cost (20 days) |
 |----------|-----------|----------------------|
-| Without tiering (25 Sonnet calls/day) | ~$42.50 | ~$850 |
+| Without tiering (~54 Sonnet calls/day) | ~$91.80 | ~$1,836 |
 | With tiering (typical) | ~$1.78 | ~$36 |
 | Tier 1 only (quiet day, no escalation) | ~$0.50 | ~$10 |
 
@@ -504,7 +504,7 @@ Guardian (every 60s):
       → Log to agent_logs (phase: "guardian")
 ```
 
-This runs independently of the 20-minute orchestrator ticks, providing near-real-time stop-loss protection.
+This runs independently of the 10-minute orchestrator ticks, providing near-real-time stop-loss protection.
 
 ---
 
@@ -981,7 +981,7 @@ Also resolved:
 | # | Gap | Impact | Severity |
 |---|-----|--------|----------|
 | B1 | Tier 1 SELL signals depend on reconciliation freshness | May miss SELL if positions stale after IBKR disconnect | Medium |
-| B3 | 20-minute tick interval | Slow reaction to sudden market events (guardian helps with stop-losses but not entry signals) | Medium |
+| B3 | 10-minute tick interval | Slow reaction to sudden market events (guardian helps with stop-losses but not entry signals) | Medium |
 | B4 | Haiku quick scan has no tools | Decides on partial data if context is incomplete | Low-Medium |
 | C1 | No fill confirmation feedback to agent | Agent doesn't know if limit order filled until next tick | Medium |
 | C2 | DAY orders expire silently | No next-day re-evaluation of unfilled orders | Medium |

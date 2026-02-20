@@ -419,7 +419,7 @@ All symbols go stale at the same rate. A volatile held position and an idle watc
 
 | Component | Current | After Changes | Delta |
 |-----------|---------|--------------|-------|
-| Tier 2 Haiku (25/day) | $0.50/day | $0.50/day | $0 |
+| Tier 2 Haiku (~54/day) | $1.08/day | $1.08/day | $0 |
 | Tier 3 Sonnet (variable) | $1.70–8.50/day | $1.71–8.52/day | +$0.01–0.02 |
 | Pre-market Sonnet | $1.70/day | $1.70/day | $0 |
 | Research pipeline | ~$3.60/day | ~$3.60/day | $0 |

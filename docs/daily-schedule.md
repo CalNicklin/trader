@@ -14,8 +14,7 @@ All times are London (Europe/London). Weekdays only unless noted.
 | Time | Job | What it does | Email? |
 |------|-----|-------------|--------|
 | Every 60s | Guardian | Stop-loss checks, position price updates, price alert accumulator | No |
-| */20 08:00-15:40 | `orchestrator_tick` | Three-tier analysis: pre-filter → Haiku scan → Sonnet (if escalated) | No |
-| 16:00, 16:20 | `orchestrator_tick` | Final ticks before wind-down | No |
+| */10 08:00-16:50 | `orchestrator_tick` | Three-tier analysis: pre-filter → Haiku scan → Sonnet (if escalated) | No |
 | 16:25-16:30 | Wind-down | No new BUY orders accepted. Guardian still runs | No |
 
 ## Post-Market

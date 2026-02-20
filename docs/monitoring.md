@@ -114,8 +114,9 @@ FROM research ORDER BY created_at DESC LIMIT 20;
 
 | Report | When | What |
 |--------|------|------|
+| **Heartbeat** | 07:00 weekdays | System alive confirmation with hostname and uptime |
 | **Trade alert** | On each fill | Symbol, side, price, quantity, reasoning |
-| **Daily summary** | 17:00 weekdays | Portfolio value, P&L, trades, positions, win rate |
+| **Daily summary** | 17:00 weekdays | Portfolio value, P&L, trades, positions, win rate, stale PR alerts |
 | **Weekly summary** | 17:30 Friday | Week-by-week breakdown, Sharpe ratio, drawdown |
 
 ---
