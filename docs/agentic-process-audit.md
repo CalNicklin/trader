@@ -573,7 +573,7 @@ TradeProposal { symbol, side, quantity, estimatedPrice, sector? }
         │
         ▼
 ┌─ CHECK 10: TRADE INTERVAL ──────────────────────────────────┐
-│  Last trade > 15 minutes ago?                               │
+│  Last trade > N minutes ago? (paper: 2min, live: 15min)     │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -605,7 +605,7 @@ TradeProposal { symbol, side, quantity, estimatedPrice, sector? }
 | Weekly loss | 5% | Risk pipeline check 12 |
 | Max positions | 10 | Risk pipeline check 6 |
 | Max trades/day | 10 | Risk pipeline check 9 |
-| Trade interval | 15 min | Risk pipeline check 10 |
+| Trade interval | 2 min (paper) / 15 min (live) | Risk pipeline check 10 |
 | Max sector | 30% | Risk pipeline check 7 |
 | Min price | £0.10 | Risk pipeline check 3 |
 | Min volume | 50,000 | Risk pipeline check 8 (Yahoo) |

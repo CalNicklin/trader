@@ -25,7 +25,7 @@ export const HARD_LIMITS = {
 	MAX_POSITIONS: 10,
 	/** Maximum trades per day */
 	MAX_TRADES_PER_DAY: 10,
-	/** Minimum minutes between trades */
+	/** Minimum minutes between trades (live mode — paper mode uses shorter interval) */
 	MIN_TRADE_INTERVAL_MIN: 15,
 	/** Maximum sector exposure % */
 	MAX_SECTOR_EXPOSURE_PCT: 30,
@@ -40,3 +40,9 @@ export const HARD_LIMITS = {
 	/** Consecutive weeks below threshold before pausing */
 	PAUSE_WEEKS_THRESHOLD: 2,
 } as const;
+
+const PAPER_TRADE_INTERVAL_MIN = 2;
+
+export function getTradeIntervalMin(mode: "paper" | "live"): number {
+	return mode === "paper" ? PAPER_TRADE_INTERVAL_MIN : HARD_LIMITS.MIN_TRADE_INTERVAL_MIN;
+}

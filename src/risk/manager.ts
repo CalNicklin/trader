@@ -1,11 +1,12 @@
 import { and, eq, gte, sql } from "drizzle-orm";
+import { getTradingMode } from "../agent/prompts/trading-mode.ts";
 import { getAccountSummary } from "../broker/account.ts";
 import { getDb } from "../db/client.ts";
 import { dailySnapshots, positions, trades, watchlist } from "../db/schema.ts";
 import { getYahooQuote } from "../research/sources/yahoo-finance.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { isSectorExcluded, isSymbolExcluded } from "./exclusions.ts";
-import { HARD_LIMITS } from "./limits.ts";
+import { getTradeIntervalMin, HARD_LIMITS } from "./limits.ts";
 
 const log = createChildLogger({ module: "risk-manager" });
 
@@ -153,9 +154,10 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 	if (recentTrades.length > 0) {
 		const lastTradeTime = new Date(recentTrades[0]!.createdAt).getTime();
 		const minutesSinceLast = (Date.now() - lastTradeTime) / 60000;
-		if (minutesSinceLast < HARD_LIMITS.MIN_TRADE_INTERVAL_MIN) {
+		const intervalMin = getTradeIntervalMin(getTradingMode());
+		if (minutesSinceLast < intervalMin) {
 			reasons.push(
-				`Only ${minutesSinceLast.toFixed(0)}min since last trade (min ${HARD_LIMITS.MIN_TRADE_INTERVAL_MIN}min)`,
+				`Only ${minutesSinceLast.toFixed(0)}min since last trade (min ${intervalMin}min)`,
 			);
 		}
 	}
