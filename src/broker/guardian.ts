@@ -4,7 +4,10 @@ import { agentLogs, positions, trades, watchlist } from "../db/schema.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { getQuotes, type Quote } from "./market-data.ts";
-import { placeTrade } from "./orders.ts";
+import { computeCleanupActions } from "./order-cleanup.ts";
+import { computeReconciliation } from "./order-reconcile.ts";
+import type { ExecutionLike, OpenOrderLike, SubmittedTrade } from "./order-types.ts";
+import { getOpenOrders, placeTrade } from "./orders.ts";
 import { findStopLossBreaches } from "./stop-loss.ts";
 
 const log = createChildLogger({ module: "guardian" });
@@ -180,28 +183,66 @@ function accumulateAlerts(quotes: Map<string, Quote>): void {
 	}
 }
 
-/** After market close, mark any SUBMITTED orders as expired */
+/** After market close, reconcile SUBMITTED orders before marking as expired.
+ *  Prevents Bug 5: fast-filled orders being incorrectly marked CANCELLED. */
 async function cleanupUnfilledOrders(): Promise<void> {
 	const db = getDb();
 	const unfilled = await db.select().from(trades).where(eq(trades.status, "SUBMITTED"));
 
 	if (unfilled.length === 0) return;
 
-	for (const trade of unfilled) {
-		await db
-			.update(trades)
-			.set({ status: "CANCELLED", updatedAt: new Date().toISOString() })
-			.where(eq(trades.id, trade.id));
+	const submittedTrades: SubmittedTrade[] = unfilled
+		.filter((t): t is typeof t & { ibOrderId: number } => t.ibOrderId !== null)
+		.map((t) => ({
+			id: t.id,
+			ibOrderId: t.ibOrderId,
+			symbol: t.symbol,
+			status: "SUBMITTED" as const,
+		}));
 
-		log.info(
-			{ tradeId: trade.id, symbol: trade.symbol },
-			"Unfilled order expired — marked CANCELLED",
-		);
+	let ibOpenOrders: readonly OpenOrderLike[] = [];
+	const ibExecutions: readonly ExecutionLike[] = [];
+	try {
+		ibOpenOrders = await getOpenOrders();
+	} catch (err) {
+		log.warn({ error: err }, "Failed to fetch open orders for reconciliation");
 	}
 
-	await db.insert(agentLogs).values({
-		level: "INFO",
-		phase: "guardian",
-		message: `Post-market cleanup: ${unfilled.length} unfilled order(s) expired`,
-	});
+	const reconciled = computeReconciliation(submittedTrades, ibOpenOrders, ibExecutions);
+	const actions = computeCleanupActions(submittedTrades, reconciled, true);
+
+	let filledCount = 0;
+	let cancelledCount = 0;
+
+	for (const action of actions) {
+		const updateData: Record<string, unknown> = {
+			updatedAt: new Date().toISOString(),
+		};
+
+		if (action.action === "FILLED") {
+			updateData.status = "FILLED";
+			updateData.filledAt = new Date().toISOString();
+			if (action.fillPrice) updateData.fillPrice = action.fillPrice;
+			if (action.commission) updateData.commission = action.commission;
+			filledCount++;
+			log.info(
+				{ tradeId: action.tradeId, fillPrice: action.fillPrice },
+				"Reconciled as FILLED during cleanup",
+			);
+		} else {
+			updateData.status = "CANCELLED";
+			cancelledCount++;
+			log.info({ tradeId: action.tradeId }, "Unfilled order expired — marked CANCELLED");
+		}
+
+		await db.update(trades).set(updateData).where(eq(trades.id, action.tradeId));
+	}
+
+	if (filledCount > 0 || cancelledCount > 0) {
+		await db.insert(agentLogs).values({
+			level: "INFO",
+			phase: "guardian",
+			message: `Post-market cleanup: ${filledCount} reconciled as FILLED, ${cancelledCount} expired as CANCELLED`,
+		});
+	}
 }

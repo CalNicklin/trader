@@ -2,8 +2,9 @@ import { desc } from "drizzle-orm";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { startAdminServer, stopAdminServer } from "./admin/server.ts";
 import { getAccountSummary, getPositions } from "./broker/account.ts";
-import { connect, disconnect } from "./broker/connection.ts";
+import { connect, disconnect, getApi } from "./broker/connection.ts";
 import { startGuardian, stopGuardian } from "./broker/guardian.ts";
+import { startOrderMonitoring, stopOrderMonitoring } from "./broker/order-monitor.ts";
 import { getConfig } from "./config.ts";
 import { closeDb, getDb } from "./db/client.ts";
 import { agentLogs } from "./db/schema.ts";
@@ -33,6 +34,9 @@ async function boot() {
 	log.info({ host: config.IBKR_HOST, port: config.IBKR_PORT }, "Connecting to IBKR...");
 	await connect();
 	log.info("Connected to IBKR");
+
+	startOrderMonitoring(getApi(), getDb());
+	log.info("Order monitoring started");
 
 	// Fetch and log account data
 	const summary = await getAccountSummary();
@@ -81,6 +85,7 @@ async function boot() {
 async function shutdown(signal: string) {
 	log.info({ signal }, "Shutting down...");
 	stopAdminServer();
+	stopOrderMonitoring();
 	stopGuardian();
 	stopScheduler();
 	await disconnect();
