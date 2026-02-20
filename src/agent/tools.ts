@@ -144,6 +144,10 @@ export const toolDefinitions: Anthropic.Tool[] = [
 				quantity: { type: "number", description: "Number of shares" },
 				orderType: { type: "string", enum: ["LIMIT", "MARKET"] },
 				limitPrice: { type: "number", description: "Limit price (required for LIMIT orders)" },
+				estimatedPrice: {
+					type: "number",
+					description: "Current market price for risk validation (required for MARKET orders)",
+				},
 				reasoning: { type: "string", description: "Explanation of why this trade is being made" },
 				confidence: { type: "number", description: "Confidence level 0.0-1.0" },
 			},
@@ -301,7 +305,10 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				const confidence = input.confidence as number;
 				const symbol = input.symbol as string;
 				const quantity = input.quantity as number;
-				const estimatedPrice = (input.limitPrice as number | undefined) ?? 0;
+				const estimatedPrice =
+					(input.estimatedPrice as number | undefined) ??
+					(input.limitPrice as number | undefined) ??
+					0;
 
 				const riskResult =
 					side === "BUY"

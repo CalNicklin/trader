@@ -1,3 +1,5 @@
+import { getTradingMode } from "./prompts/trading-mode.ts";
+
 type MarketPhase = "pre-market" | "open" | "wind-down" | "post-market" | "research" | "closed";
 
 export interface TradeGateInput {
@@ -14,8 +16,9 @@ export interface TradeGateInput {
  */
 export function checkTradeGates(input: TradeGateInput): string | null {
 	if (input.side === "BUY") {
-		if (input.confidence < 0.7) {
-			return `Confidence ${input.confidence} below minimum 0.7`;
+		const minConfidence = getTradingMode() === "paper" ? 0.5 : 0.7;
+		if (input.confidence < minConfidence) {
+			return `Confidence ${input.confidence} below minimum ${minConfidence}`;
 		}
 
 		if (input.marketPhase === "wind-down" || input.marketPhase === "post-market") {
