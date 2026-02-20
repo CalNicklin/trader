@@ -236,7 +236,7 @@ Every 10 min during market hours:
                              │ always runs
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ TIER 2: Haiku Quick Scan (~$0.02)                            │
+│ TIER 2: Haiku Quick Scan (~$0.001)                           │
 │                                                              │
 │  Model: claude-haiku-4-5-20251001                            │
 │  Max tokens: 256                                             │
@@ -252,7 +252,7 @@ Every 10 min during market hours:
                              │ escalate = true
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ TIER 3: Full Sonnet Agent Loop (~$1.70)                      │
+│ TIER 3: Full Sonnet Agent Loop (~$0.35)                      │
 │                                                              │
 │  Model: claude-sonnet-4-5-20250929                           │
 │  Max tokens: 4096                                            │
@@ -295,8 +295,8 @@ This means the orchestrator is aware of significant moves that happened between 
 | Scenario | Daily Cost | Monthly Cost (20 days) |
 |----------|-----------|----------------------|
 | Without tiering (~54 Sonnet calls/day) | ~$91.80 | ~$1,836 |
-| With tiering (typical) | ~$1.78 | ~$36 |
-| Tier 1 only (quiet day, no escalation) | ~$0.50 | ~$10 |
+| With tiering (typical) | ~$1.40–2.10 | ~$28–42 |
+| Tier 1 only (quiet day, no escalation) | ~$0.05 | ~$1 |
 
 ---
 

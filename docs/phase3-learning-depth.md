@@ -93,7 +93,7 @@ If the log says "NO TRADES" or similar with no specific stocks mentioned, return
 Return JSON: { "symbols": [...] }`;
 ```
 
-This is one Haiku call (~$0.02) for all of today's decisions batched together.
+This is one Haiku call (~$0.005) for all of today's decisions batched together.
 
 ### Scoring Logic
 
@@ -152,7 +152,7 @@ Respond with JSON:
 }`;
 ```
 
-Cost: ~$0.02 per missed opportunity. Typically 0-3 per day.
+Cost: ~$0.005 per missed opportunity. Typically 0-3 per day.
 
 ### Database Schema
 
@@ -244,10 +244,10 @@ After market close:
   17:15: Trade reviewer (existing) — scores FILLED trades
   17:30: Decision scorer (NEW) — scores HOLD/WATCH/PASS decisions
     1. Batch all DECISION logs from today
-    2. Extract symbols + actions via Haiku ($0.02)
+    2. Extract symbols + actions via Haiku ($0.005)
     3. Get closing prices for each symbol
     4. Score each decision
-    5. For missed opportunities: Haiku analysis ($0.02 each, 0-3 typical)
+    5. For missed opportunities: Haiku analysis ($0.005 each, 0-3 typical)
     6. Store to decision_scores table
 
 Wednesday/Friday 19:00:
@@ -259,9 +259,9 @@ Wednesday/Friday 19:00:
 
 | Component | Per Day | Per Month (20 days) |
 |-----------|---------|-------------------|
-| Decision extraction (1 Haiku call) | $0.02 | $0.40 |
-| Missed opportunity analysis (0-3 Haiku) | $0.00-0.06 | $0.00-1.20 |
-| **Total** | **$0.02-0.08** | **$0.40-1.60** |
+| Decision extraction (1 Haiku call) | $0.005 | $0.10 |
+| Missed opportunity analysis (0-3 Haiku) | $0.00-0.015 | $0.00-0.30 |
+| **Total** | **$0.005-0.02** | **$0.10-0.40** |
 
 ---
 
@@ -559,10 +559,10 @@ Week 8:
 
 | Component | Per Day | Per Month |
 |-----------|---------|-----------|
-| Decision extraction (1 Haiku) | $0.02 | $0.40 |
-| Missed opportunity analysis (0-3 Haiku) | $0.00-0.06 | $0.00-1.20 |
+| Decision extraction (1 Haiku) | $0.005 | $0.10 |
+| Missed opportunity analysis (0-3 Haiku) | $0.00-0.015 | $0.00-0.30 |
 | Hypothesis management (within existing pattern analysis call) | $0.00 | $0.00 |
-| **Total Phase 3** | **$0.02-0.08** | **$0.40-1.60** |
+| **Total Phase 3** | **$0.005-0.02** | **$0.10-0.40** |
 
 ---
 

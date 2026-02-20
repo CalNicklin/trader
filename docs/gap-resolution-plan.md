@@ -187,7 +187,7 @@ With max 10 symbols researched per day, old entries go stale indefinitely. Score
 
 ### B2 — Pre-Filter Vestigial
 
-Acknowledged as low impact. Haiku scan runs for every tick ($0.50/day). Pre-filter reasons are informational.
+Acknowledged as low impact. Haiku scan runs for every tick (~$0.05/day). Pre-filter reasons are informational.
 
 **Fix:** No action needed. Cost is acceptable and Haiku decisions are valuable.
 
@@ -293,7 +293,7 @@ Only FILLED trades get reviewed. Cancelled/expired orders could hold lessons (e.
 
 **Fix:** Include CANCELLED and expired (unfilled DAY) orders in the trade review job. Typically 0–3 per day.
 
-**Cost:** +~3 Haiku calls/day × $0.02 = +$0.06/day ≈ **$1.20/month**
+**Cost:** +~3 Haiku calls/day × $0.005 = +$0.015/day ≈ **$0.30/month**
 
 **Where:** `src/learning/trade-reviewer.ts`
 
@@ -319,7 +319,7 @@ This is a ~10-line function (Wilson score is a simple formula) and eliminates fa
 
 ---
 
-**Total cost impact: ~$1.20/month**
+**Total cost impact: ~$0.30/month**
 
 ---
 
@@ -419,13 +419,13 @@ All symbols go stale at the same rate. A volatile held position and an idle watc
 
 | Component | Current | After Changes | Delta |
 |-----------|---------|--------------|-------|
-| Tier 2 Haiku (~54/day) | $1.08/day | $1.08/day | $0 |
-| Tier 3 Sonnet (variable) | $1.70–8.50/day | $1.71–8.52/day | +$0.01–0.02 |
-| Pre-market Sonnet | $1.70/day | $1.70/day | $0 |
-| Research pipeline | ~$3.60/day | ~$3.60/day | $0 |
-| Trade reviews | ~$0.10/day | ~$0.16/day | +$0.06 |
+| Tier 2 Haiku (~54/day) | ~$0.05/day | ~$0.05/day | $0 |
+| Tier 3 Sonnet (variable) | $0.35–1.75/day | $0.35–1.75/day | $0 |
+| Pre-market Sonnet | ~$0.20/day | ~$0.20/day | $0 |
+| Research pipeline | ~$0.50/day | ~$0.50/day | $0 |
+| Trade reviews | ~$0.05/day | ~$0.07/day | +$0.02 |
 | Pattern analysis | ~$0.01/day | ~$0.01/day | $0 |
-| Self-improvement | ~$0.24/day | ~$0.24/day | $0 |
+| Self-improvement | ~$0.10/day | ~$0.10/day | $0 |
 | Position Guardian | — | $0/day | $0 |
 
 ### Scenario-Based Monthly Estimates
@@ -434,12 +434,12 @@ The cost depends heavily on how active the agent is. Sonnet escalation is the ma
 
 | Scenario | Sonnet Calls/Day | Daily Cost | Monthly (20 days) | Delta from Changes |
 |----------|-----------------|-----------|-------------------|-------------------|
-| **Quiet** (paper trading, no positions, all-HOLD) | 0–1 | ~$6.15 | ~$123 | +$1.20 |
-| **Typical** (few positions, occasional trades) | 1–2 | ~$8.70 | ~$174 | +$1.40 |
-| **Active** (multiple positions, volatile market) | 3–5 | ~$12.80 | ~$256 | +$1.60 |
-| **Heavy** (high volatility, frequent escalation) | 5–8 | ~$17.90 | ~$358 | +$1.80 |
+| **Quiet** (paper trading, no positions, all-HOLD) | 0–1 | ~$0.60 | ~$12 | +$0.30 |
+| **Typical** (few positions, occasional trades) | 1–2 | ~$1.40–2.10 | ~$28–42 | +$0.30 |
+| **Active** (multiple positions, volatile market) | 3–5 | ~$2.80 | ~$56 | +$0.30 |
+| **Heavy** (high volatility, frequent escalation) | 5–8 | ~$4.50 | ~$90 | +$0.30 |
 
-The gap resolution adds ~$1.20–1.80/month regardless of activity level, because the fixes are almost entirely code changes and small context enrichments. The main cost driver remains Sonnet escalation frequency, which is unchanged by these fixes.
+The gap resolution adds ~$0.30–0.60/month regardless of activity level, because the fixes are almost entirely code changes and small context enrichments. The main cost driver remains Sonnet escalation frequency, which is unchanged by these fixes.
 
 ### Gap Resolution Summary
 
@@ -448,6 +448,6 @@ The gap resolution adds ~$1.20–1.80/month regardless of activity level, becaus
 | Code-only fixes | D1, D3, D4, A2, A5, C3, E2, E4, E5, G4, B2, G1 | Enforce existing rules in code | $0 |
 | Position Guardian | A4, B3, C1, C2, G3, H1 | IBKR streaming + 60s loop | $0 |
 | Context enrichment | A1, A3, B1, B4, H2, H3 | Extra tokens in existing calls | $0.20/mo |
-| Additional AI calls | F1, F5 | Few extra Haiku reviews/day | $1.20/mo |
+| Additional AI calls | F1, F5 | Few extra Haiku reviews/day | $0.30/mo |
 | Process fixes | D2, E1, E3, F2, F3, F4, G2, G5 | Code + config changes | $0 |
-| **Total** | **29 gaps** | | **+$1.20–1.80/mo** |
+| **Total** | **29 gaps** | | **+$0.30–0.60/mo** |

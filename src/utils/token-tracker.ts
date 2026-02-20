@@ -1,38 +1,7 @@
 import { gte, sql } from "drizzle-orm";
 import { getDb } from "../db/client.ts";
 import { tokenUsage } from "../db/schema.ts";
-
-// Pricing per million tokens by model tier
-const PRICING = {
-	opus: { input: 15.0, output: 75.0, cacheWrite: 18.75, cacheRead: 1.5 },
-	sonnet: { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
-	haiku: { input: 1.0, output: 5.0, cacheWrite: 1.25, cacheRead: 0.1 },
-} as const;
-
-// Jobs that use the Opus model (none currently — CLAUDE_MODEL defaults to Sonnet)
-const OPUS_JOBS = new Set<string>([]);
-
-function estimateCost(
-	job: string,
-	inputTokens: number,
-	outputTokens: number,
-	cacheCreationTokens?: number,
-	cacheReadTokens?: number,
-): number {
-	const p = OPUS_JOBS.has(job) ? PRICING.opus : PRICING.sonnet;
-	// Cache tokens are already counted in inputTokens — subtract them to avoid double-counting,
-	// then add back at their discounted rates
-	const cacheWrite = cacheCreationTokens ?? 0;
-	const cacheRead = cacheReadTokens ?? 0;
-	const normalInput = inputTokens - cacheWrite - cacheRead;
-	return (
-		(normalInput * p.input +
-			outputTokens * p.output +
-			cacheWrite * p.cacheWrite +
-			cacheRead * p.cacheRead) /
-		1_000_000
-	);
-}
+import { estimateCost } from "./cost.ts";
 
 export async function recordUsage(
 	job: string,

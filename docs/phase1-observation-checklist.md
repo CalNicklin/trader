@@ -117,9 +117,9 @@ ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml p
 ```bash
 ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh -c "apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/trader.db \"SELECT job, ROUND(SUM(estimated_cost_usd), 3) as cost, COUNT(*) as calls FROM token_usage WHERE created_at > date('"'"'now'"'"', '"'"'-7 days'"'"') GROUP BY job ORDER BY cost DESC\""'
 ```
-- [ ] Daily cost is roughly $0.50-$3 (depends on escalation frequency)
-- [ ] Haiku scans are cheap (~$0.02 each)
-- [ ] Sonnet escalations are the main cost driver (~$1.70 each)
+- [ ] Daily cost is roughly $0.50-$4.50 (depends on escalation frequency)
+- [ ] Haiku scans are cheap (~$0.002 each)
+- [ ] Sonnet escalations are the main cost driver (~$0.35 each)
 - [ ] No single job is unexpectedly expensive
 
 ---
@@ -129,7 +129,7 @@ ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh 
 - Guardian crashing or not updating prices
 - Risk gates never reached (code path dead)
 - Repeated boot failures or rejection storms
-- Cost runaway (>$5/day consistently)
+- Cost runaway (>$6/day consistently)
 - Daily summary emails not arriving
 - Persistent Yahoo Finance or IBKR connection errors
 
@@ -139,7 +139,7 @@ ssh deploy@46.225.127.44 'docker run --rm -v docker_trader-data:/data alpine sh 
 - [ ] Guardian reliably updating prices
 - [ ] At least one post-market cleanup logged
 - [ ] Haiku scans running + at least one Sonnet escalation
-- [ ] Daily cost within expected range ($0.50-$3)
+- [ ] Daily cost within expected range ($0.50-$4.50)
 - [ ] Receiving heartbeat + daily summary emails consistently
 - [ ] No red flags above
 
@@ -194,13 +194,13 @@ Tick frequency changed from `*/20 7-16` to `*/10 8-16` (10-min ticks, ~54/day du
 ### Cost expectations revised
 
 With the three-tier architecture restored and 10-min ticks (~54 Haiku scans/day), expected costs are:
-- Haiku scans: ~54/day × $0.02 = ~$1.08/day
-- Sonnet escalations: ~1–3/day × $0.20 = ~$0.20–0.60/day (Sonnet 4.5 not Opus rates)
+- Haiku scans: ~54/day × $0.001 = ~$0.05/day
+- Sonnet escalations: ~1–3/day × $0.35 = ~$0.35–1.05/day
 - Pre-market Sonnet: ~$0.20/day
 
-**Total: ~$1.50–2.00/day during paper trading.** Red flag threshold: **$4/day**.
+**Total: ~$1.40–2.10/day during paper trading.** Red flag threshold: **$6/day**.
 
-**Impact on §6 (Cost Tracking):** `token_usage` costs were historically overstated ~3–5× due to wrong model rate lookups (fixed Feb 19 for Sonnet; Haiku still overstated ~3×). Divide DB-reported Haiku costs by ~3 for actual spend.
+**Impact on §6 (Cost Tracking):** `token_usage` costs were historically overstated ~3× due to Haiku jobs being charged at Sonnet rates. Fixed Feb 20 — `estimateCost()` now correctly routes Haiku jobs to Haiku pricing ($1/$5/MTok). New cost recordings are accurate; historical records prior to the fix remain overstated.
 
 ### Pence/pounds pricing fix
 

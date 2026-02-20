@@ -110,8 +110,8 @@
 | Aspect               | Status      | Detail                                                                                                                                                   |
 | -------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Cost tracking        | Working     | `token_usage` table, daily summary email includes API costs                                                                                              |
-| Cost reduction       | Achieved    | Three-tier architecture reduced from ~$200/day to ~$6-18/day                                                                                             |
-| Agent cost awareness | **Missing** | The agent doesn't know what it costs. It can't factor running costs into its decisions. It doesn't know "I need to make $174/month to break even"        |
+| Cost reduction       | Achieved    | Three-tier architecture reduced from ~$200/day to ~$1.40–4.50/day                                                                                        |
+| Agent cost awareness | **Missing** | The agent doesn't know what it costs. It can't factor running costs into its decisions. It doesn't know "I need to make ~$28–42/month to break even"     |
 | Revenue target       | **Missing** | No concept of a performance threshold tied to operating costs. The auto-pause checks win rate but not absolute P&L vs costs                              |
 | Cost optimisation    | Partial     | G4 (accurate cost tracking) in the plan. But no mechanism to reduce costs during losing streaks (e.g., reduce tick frequency if the agent isn't trading) |
 

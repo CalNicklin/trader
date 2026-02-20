@@ -34,11 +34,11 @@ The limitation is real — PRs require manual merge, so the loop has human laten
 
 ### Goal 6: Cost efficiency — MOSTLY ACHIEVED
 
-Three-tier architecture already keeps costs in the $6–18/day range. Gap plan adds accurate cost tracking (G4). The infrastructure is cost-efficient.
+Three-tier architecture already keeps costs in the ~$1.40–4.50/day range. Gap plan adds accurate cost tracking (G4). The infrastructure is cost-efficient.
 
 The missing piece — agent cost-awareness — is a small addition. Inject monthly API spend and a break-even target into the trading context. This is ~50 tokens of extra context, effectively free.
 
-But there's a harder truth: at $174/month typical costs, the agent needs to generate ~£140/month (~£1,680/year) in profit just to break even. On a £20K ISA, that's an 8.4% annual return just to cover API costs. That's achievable but not trivial — it's roughly the long-term equity market average. The agent needs to be *good*, not just functional.
+But there's a harder truth: at ~$28–42/month typical costs, the agent needs to generate ~£23–34/month (~£270–410/year) in profit just to break even. On a £20K ISA, that's a 1.4–2.1% annual return just to cover API costs. That's very achievable — well below the long-term equity market average.
 
 **Confidence: 70%.** Costs are managed. Whether returns cover them depends entirely on trading intelligence (Goal 9).
 
@@ -72,7 +72,7 @@ Both of these are solvable. A "decision scorer" job that runs daily:
 3. Score: was the inaction correct? (Stock flat/down = good HOLD. Stock up 5%+ = missed opportunity)
 4. Feed into the existing pattern analysis pipeline
 
-This would be a Haiku call per scored decision. Maybe 5–10 decisions/day at $0.02 each = $0.10–0.20/day. Not free, but the learning value is high.
+This would be a Haiku call per scored decision. Maybe 5–10 decisions/day at ~$0.005 each = $0.025–0.05/day. Not free, but the learning value is high.
 
 **Confidence: 55%.** The loop works for trades but is blind to 90%+ of the agent's decisions. The decision scorer closes this gap affordably.
 
@@ -115,21 +115,21 @@ The orchestrator pattern works well. The three-tier escalation is smart. The too
 
 The goals-vs-reality doc correctly identifies that it's a single-agent architecture. One Sonnet agent does everything: research assessment, risk evaluation, portfolio thinking, and trade execution. This creates two problems:
 
-1. **Wasted iterations.** The agent often makes 10+ tool calls before concluding "no action." It researches, checks risk, gets quotes, and then decides to hold — spending $1.70 to say "nothing to do."
+1. **Wasted iterations.** The agent often makes 10+ tool calls before concluding "no action." It researches, checks risk, gets quotes, and then decides to hold — spending ~$0.35 to say "nothing to do."
 
 2. **No specialisation.** The same prompt tries to be a research analyst, risk manager, and portfolio manager simultaneously. Jack of all trades.
 
 The multi-agent pattern proposed in the goals doc is the right direction:
 
 ```
-Current:  Sonnet (all-in-one, 10 tool iterations, ~$1.70)
+Current:  Sonnet (all-in-one, 10 tool iterations, ~$0.35)
 
-Proposed: Haiku (research brief, 1 call, ~$0.02)
-          → Haiku (risk assessment, 1 call, ~$0.02)
-          → Sonnet (portfolio decision, 1-3 tool calls, ~$0.50-0.80)
+Proposed: Haiku (research brief, 1 call, ~$0.005)
+          → Haiku (risk assessment, 1 call, ~$0.005)
+          → Sonnet (portfolio decision, 1-3 tool calls, ~$0.15-0.25)
 ```
 
-Two cheap Haiku calls pre-digest the research and risk context. Sonnet gets a focused brief and makes a decision in fewer iterations. Total cost per escalation drops from ~$1.70 to ~$0.55–0.85, and decision quality improves because each model gets a focused task.
+Two cheap Haiku calls pre-digest the research and risk context. Sonnet gets a focused brief and makes a decision in fewer iterations. Total cost per escalation drops from ~$0.35 to ~$0.16–0.26, and decision quality improves because each model gets a focused task.
 
 This is a meaningful refactor of `src/agent/planner.ts` and the prompt structure, but it doesn't change the broader architecture. The orchestrator, guardian, scheduler, and risk system are all unchanged.
 
@@ -204,7 +204,7 @@ This is ~20 lines of code per indicator, using the daily bars already fetched. I
 | 5. Risk & exclusions | 95% | None — gap plan covers it |
 | 3. Self-modification | 85% | Manual PR review (by design) |
 | 4. Active research | 75% | Missing data sources (tractable) |
-| 6. Cost efficiency | 70% | Returns must cover $174/mo (depends on Goal 9) |
+| 6. Cost efficiency | 70% | Returns must cover ~$28–42/mo (depends on Goal 9) |
 | 8. Agentic architecture | 60% | Single-agent pattern (optimisation, not blocker) |
 | 1. Learning from decisions | 55% | Blind to inaction (decision scorer needed) |
 | 2. Strategy evolution | 35% | No strategy journal or hypothesis testing |
@@ -318,11 +318,11 @@ Build in order. Phase 1 first.
 
 **Decision made 2026-02-16.** This is a binding principle for the project.
 
-During paper trading, the system spent Day 1 driving AI costs from $200/day down to ~$6/day. This was a 97% reduction achieved by:
+During paper trading, the system spent Day 1 driving AI costs from $200/day down to ~$1.40–2.10/day. This was a 99% reduction achieved by:
 - Downgrading Sonnet to Haiku for analysis jobs
 - Reducing tick frequency from 5 min to 20 min
 - Adding a pre-filter that skips Claude entirely on quiet ticks
-- Using Haiku ($0.02) as the primary triage model
+- Using Haiku (~$0.001) as the primary triage model
 
 The result: a cost-efficient system that confidently does nothing. The agent ran all day producing "NO TRADES" decisions. Cost savings are meaningless if the system doesn't trade.
 
