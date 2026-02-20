@@ -171,7 +171,7 @@ The bar for starting Phase 2 is simply: **Phase 1 is stable and not broken.**
 
 ---
 
-## Divergences from Original Plan (as of 2026-02-19)
+## Divergences from Original Plan (as of 2026-02-19, may need updating)
 
 The checklist above is the original baseline. Below are changes made during the first days of observation and how they affect each section.
 
