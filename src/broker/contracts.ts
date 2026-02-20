@@ -4,12 +4,14 @@ import { getApi } from "./connection.ts";
 
 const log = createChildLogger({ module: "broker-contracts" });
 
-/** Create a Contract for an LSE-listed stock */
+/** Create a Contract for an LSE-listed stock.
+ *  Uses SMART routing — IB paper trading doesn't fill direct LSE-routed orders. */
 export function lseStock(symbol: string): Contract {
 	return {
 		symbol,
 		secType: SecType.STK,
-		exchange: "LSE",
+		exchange: "SMART",
+		primaryExch: "LSE",
 		currency: "GBP",
 	};
 }
