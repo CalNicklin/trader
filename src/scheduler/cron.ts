@@ -77,6 +77,13 @@ export function startScheduler(): void {
 		}),
 	);
 
+	// Heartbeat at 07:00 weekdays — confirms the system is alive
+	tasks.push(
+		cron.schedule("0 7 * * 1-5", () => runJobs("heartbeat"), {
+			timezone: "Europe/London",
+		}),
+	);
+
 	log.info({ jobCount: tasks.length }, "Scheduler started");
 }
 
