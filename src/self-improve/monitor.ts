@@ -18,6 +18,7 @@ import { sendEmail } from "../reporting/email.ts";
 import { calculateMetrics } from "../reporting/metrics.ts";
 import { HARD_LIMITS } from "../risk/limits.ts";
 import { createChildLogger } from "../utils/logger.ts";
+import { wilsonLower } from "../utils/stats.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
 import { generateCodeChange } from "./code-generator.ts";
 import { createPR } from "./github.ts";
@@ -225,17 +226,22 @@ async function checkPerformancePause(): Promise<boolean> {
 
 	const wins = recentTrades.filter((t) => t.pnl !== null && t.pnl > 0).length;
 	const total = recentTrades.filter((t) => t.pnl !== null).length;
-	const winRate = total > 0 ? wins / total : 1;
 
-	if (winRate < HARD_LIMITS.PAUSE_WIN_RATE_THRESHOLD && total >= 5) {
-		log.warn({ winRate, total }, "Win rate below threshold - pausing trading");
+	const winRate = total > 0 ? wins / total : 1;
+	const wilsonBound = wilsonLower(wins, total);
+
+	if (wilsonBound < HARD_LIMITS.PAUSE_WIN_RATE_THRESHOLD && total >= 5) {
+		log.warn(
+			{ winRate, wilsonBound, total },
+			"Wilson lower bound below threshold - pausing trading",
+		);
 		setPaused(true);
 
 		await sendEmail({
 			subject: "ALERT: Trading Paused - Poor Performance",
 			html: `
 <h2>Trading has been automatically paused</h2>
-<p>Win rate over the last 2 weeks: <strong>${(winRate * 100).toFixed(1)}%</strong> (threshold: ${HARD_LIMITS.PAUSE_WIN_RATE_THRESHOLD * 100}%)</p>
+<p>Win rate over the last 2 weeks: <strong>${(winRate * 100).toFixed(1)}%</strong> (Wilson lower bound: ${(wilsonBound * 100).toFixed(1)}%, threshold: ${HARD_LIMITS.PAUSE_WIN_RATE_THRESHOLD * 100}%)</p>
 <p>Total trades: ${total} | Wins: ${wins} | Losses: ${total - wins}</p>
 <p>Please review performance and manually restart when ready.</p>
 			`.trim(),

@@ -9,7 +9,10 @@ import { research, trades, watchlist } from "../db/schema.ts";
 import { researchSymbol } from "../research/pipeline.ts";
 import { updateScore } from "../research/watchlist.ts";
 import { checkTradeRisk, getMaxPositionSize } from "../risk/manager.ts";
+import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
+import { addIntention, getPendingIntentions } from "./intentions.ts";
+import { checkTradeGates } from "./trade-gates.ts";
 
 const log = createChildLogger({ module: "agent-tools" });
 
@@ -186,6 +189,28 @@ export const toolDefinitions: Anthropic.Tool[] = [
 			required: ["message"],
 		},
 	},
+	{
+		name: "log_intention",
+		description:
+			"Record a conditional plan for future ticks. The system checks these against live quotes each tick and escalates when conditions are met.",
+		input_schema: {
+			type: "object" as const,
+			properties: {
+				symbol: { type: "string", description: "Stock ticker symbol" },
+				condition: {
+					type: "string",
+					description:
+						'Price condition using "price < X" or "price > X" format, e.g. "price < 2450"',
+				},
+				action: {
+					type: "string",
+					description: "What to do when condition is met (BUY, SELL, REVIEW)",
+				},
+				note: { type: "string", description: "Context for why this intention exists" },
+			},
+			required: ["symbol", "condition", "action", "note"],
+		},
+	},
 ];
 
 /** Execute a tool call and return the result */
@@ -272,14 +297,38 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				return JSON.stringify(result);
 			}
 			case "place_trade": {
+				const side = input.side as "BUY" | "SELL";
+				const confidence = input.confidence as number;
+				const symbol = input.symbol as string;
+				const quantity = input.quantity as number;
+				const estimatedPrice = (input.limitPrice as number | undefined) ?? 0;
+
+				const riskResult =
+					side === "BUY"
+						? await checkTradeRisk({ symbol, side, quantity, estimatedPrice })
+						: { approved: true, reasons: [] as string[] };
+
+				const gateError = checkTradeGates({
+					side,
+					confidence,
+					marketPhase: getMarketPhase(),
+					riskApproved: riskResult.approved,
+					riskReasons: riskResult.reasons,
+				});
+
+				if (gateError) {
+					log.warn({ symbol, side, confidence, gateError }, "Trade rejected by gate");
+					return JSON.stringify({ error: gateError });
+				}
+
 				const tradeReq: TradeRequest = {
-					symbol: input.symbol as string,
-					side: input.side as "BUY" | "SELL",
-					quantity: input.quantity as number,
+					symbol,
+					side,
+					quantity,
 					orderType: input.orderType as "LIMIT" | "MARKET",
 					limitPrice: input.limitPrice as number | undefined,
 					reasoning: input.reasoning as string,
-					confidence: input.confidence as number,
+					confidence,
 				};
 				const result = await placeTrade(tradeReq);
 				return JSON.stringify(result);
@@ -332,6 +381,19 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 					phase: "trading",
 				});
 				return JSON.stringify({ logged: true });
+			}
+			case "log_intention": {
+				addIntention({
+					symbol: input.symbol as string,
+					condition: input.condition as string,
+					action: input.action as string,
+					note: input.note as string,
+				});
+				log.info(
+					{ symbol: input.symbol, condition: input.condition, action: input.action },
+					"Intention logged",
+				);
+				return JSON.stringify({ logged: true, pendingIntentions: getPendingIntentions().length });
 			}
 			default:
 				return JSON.stringify({ error: `Unknown tool: ${name}` });

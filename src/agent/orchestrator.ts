@@ -7,6 +7,9 @@ import { agentLogs, dailySnapshots, positions, research, trades, watchlist } fro
 import { buildLearningBrief, buildRecentContext } from "../learning/context-builder.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
+import { withRetry } from "../utils/retry.ts";
+import { buildContextEnrichments } from "./context-enrichments.ts";
+import { checkIntentions, clearAllIntentions } from "./intentions.ts";
 import { runQuickScan, runTradingAnalyst } from "./planner.ts";
 import { DAY_PLAN_PROMPT, MINI_ANALYSIS_PROMPT } from "./prompts/trading-analyst.ts";
 
@@ -17,6 +20,10 @@ const lastQuotes = new Map<string, number>();
 
 /** Price move threshold to trigger analysis */
 const PRICE_MOVE_THRESHOLD = 0.02; // 2%
+
+/** Inter-tick memory — survives across ticks within a trading day */
+let currentDayPlan: string | null = null;
+let lastAgentResponse: string | null = null;
 
 export type OrchestratorState =
 	| "idle"
@@ -137,6 +144,7 @@ ${learningBrief ? `\n${learningBrief}` : ""}
 `;
 
 		const response = await runTradingAnalyst(`${DAY_PLAN_PROMPT}\n\n${context}`);
+		currentDayPlan = response.text;
 		log.info({ plan: response.text.substring(0, 200) }, "Day plan generated");
 	} catch (error) {
 		log.error({ error }, "Pre-market phase failed");
@@ -204,6 +212,18 @@ async function shouldRunAnalysis(): Promise<MarketState> {
 	if (actionable.length > 0) {
 		const actions = actionable.map((r) => `${r.symbol}:${r.suggestedAction}`).join(", ");
 		reasons.push(`Actionable research: ${actions}`);
+	}
+
+	// Check logged intentions against current quotes
+	const priceMap = new Map<string, number>();
+	for (const [symbol, quote] of quotes) {
+		if (quote.last) priceMap.set(symbol, quote.last);
+	}
+	const metIntentions = checkIntentions(priceMap);
+	for (const intent of metIntentions) {
+		reasons.push(
+			`Intention met: ${intent.symbol} ${intent.condition} (now ${intent.currentPrice}) → ${intent.action}`,
+		);
 	}
 
 	return { reasons, quotes };
@@ -329,6 +349,30 @@ Watchlist top scores: ${watchlistItems
 		log.info({ reason: scan.reason }, "Escalating to full Sonnet analysis");
 
 		const recentContext = await buildRecentContext();
+
+		const posSymbolSet = new Set(positionRows.map((p) => p.symbol));
+		const quoteSuccessCount = [...preFilter.quotes.values()].filter((q) => q.last !== null).length;
+		const quoteFailures = [...posSymbolSet].filter(
+			(s) => !preFilter.quotes.has(s) || preFilter.quotes.get(s)?.last === null,
+		);
+
+		const positionsWithSectors = positionRows.map((p) => {
+			const wl = watchlistItems.find((w) => w.symbol === p.symbol);
+			return {
+				symbol: p.symbol,
+				marketValue: p.marketValue ?? 0,
+				sector: wl?.sector ?? null,
+			};
+		});
+
+		const enrichments = buildContextEnrichments({
+			dayPlan: currentDayPlan,
+			lastAgentResponse,
+			positionsWithSectors,
+			quoteSuccessCount,
+			quoteFailures,
+		});
+
 		let fullContext: string;
 
 		if (positionRows.length === 0) {
@@ -336,6 +380,7 @@ Watchlist top scores: ${watchlistItems
 Watchlist quotes: ${JSON.stringify(Object.fromEntries(preFilter.quotes))}
 Watchlist data: ${JSON.stringify(watchlistItems)}
 ${recentContext ? `\n${recentContext}` : ""}
+${enrichments ? `\n${enrichments}` : ""}
 Escalation reason: ${scan.reason}
 `;
 		} else {
@@ -351,11 +396,13 @@ Positions with current quotes: ${JSON.stringify(
 				})),
 			)}
 ${recentContext ? `\n${recentContext}` : ""}
+${enrichments ? `\n${enrichments}` : ""}
 Escalation reason: ${scan.reason}
 `;
 		}
 
-		await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${fullContext}`);
+		const response = await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${fullContext}`);
+		lastAgentResponse = response.text;
 	} catch (error) {
 		log.error({ error }, "Active trading tick failed");
 	}
@@ -376,9 +423,16 @@ async function onWindDown(): Promise<void> {
 async function onPostMarket(): Promise<void> {
 	log.info("Post-market phase starting");
 
+	currentDayPlan = null;
+	lastAgentResponse = null;
+	clearAllIntentions();
+
 	try {
 		await reconcilePositions();
-		await recordDailySnapshot();
+		await withRetry(() => recordDailySnapshot(), "recordDailySnapshot", {
+			maxAttempts: 3,
+			baseDelayMs: 30_000,
+		});
 
 		log.info("Post-market complete");
 	} catch (error) {

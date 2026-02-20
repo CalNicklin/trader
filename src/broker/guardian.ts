@@ -5,6 +5,7 @@ import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { getQuotes, type Quote } from "./market-data.ts";
 import { placeTrade } from "./orders.ts";
+import { findStopLossBreaches } from "./stop-loss.ts";
 
 const log = createChildLogger({ module: "guardian" });
 
@@ -97,38 +98,32 @@ async function enforceStopLosses(
 	}>,
 	quotes: Map<string, Quote>,
 ): Promise<void> {
-	for (const pos of positionRows) {
-		if (!pos.stopLossPrice || pos.quantity <= 0) continue;
+	const breaches = findStopLossBreaches(positionRows, quotes);
 
-		const quote = quotes.get(pos.symbol);
-		const price = quote?.last ?? quote?.bid ?? null;
-		if (price === null) continue;
+	for (const breach of breaches) {
+		log.warn(
+			{ symbol: breach.symbol, price: breach.price, stopLoss: breach.stopLossPrice },
+			"Stop-loss triggered — placing MARKET SELL",
+		);
 
-		if (price <= pos.stopLossPrice) {
-			log.warn(
-				{ symbol: pos.symbol, price, stopLoss: pos.stopLossPrice },
-				"Stop-loss triggered — placing MARKET SELL",
-			);
+		try {
+			await placeTrade({
+				symbol: breach.symbol,
+				side: "SELL",
+				quantity: breach.quantity,
+				orderType: "MARKET",
+				reasoning: `Stop-loss triggered: price ${breach.price} <= stop ${breach.stopLossPrice}`,
+				confidence: 1.0,
+			});
 
-			try {
-				await placeTrade({
-					symbol: pos.symbol,
-					side: "SELL",
-					quantity: pos.quantity,
-					orderType: "MARKET",
-					reasoning: `Stop-loss triggered: price ${price} <= stop ${pos.stopLossPrice}`,
-					confidence: 1.0,
-				});
-
-				const db = getDb();
-				await db.insert(agentLogs).values({
-					level: "ACTION",
-					phase: "guardian",
-					message: `Stop-loss executed for ${pos.symbol}: price ${price} <= stop ${pos.stopLossPrice}, sold ${pos.quantity} shares`,
-				});
-			} catch (error) {
-				log.error({ symbol: pos.symbol, error }, "Stop-loss SELL failed");
-			}
+			const db = getDb();
+			await db.insert(agentLogs).values({
+				level: "ACTION",
+				phase: "guardian",
+				message: `Stop-loss executed for ${breach.symbol}: price ${breach.price} <= stop ${breach.stopLossPrice}, sold ${breach.quantity} shares`,
+			});
+		} catch (error) {
+			log.error({ symbol: breach.symbol, error }, "Stop-loss SELL failed");
 		}
 	}
 }
