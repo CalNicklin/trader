@@ -7,12 +7,13 @@ Respond with JSON only: {"escalate": true/false, "reason": "brief explanation"}`
 const PAPER_RULES = `
 Escalate (true) when:
 - A position is near its stop loss or take-profit target
-- A stock has a BUY or SELL research signal with confidence >= 0.65
-- A price move > 2% creates a new entry/exit opportunity
+- A stock has a BUY or SELL research signal with confidence >= 0.65 AND it was NOT already analyzed in the last Sonnet decision
+- A price move > 2% creates a new entry/exit opportunity since the last analysis
 - A pending order is close to filling based on current quotes
-- Market conditions have materially changed
+- Market conditions have materially changed since the last Sonnet decision
 
 Do NOT escalate when:
+- The last Sonnet decision already analyzed these same signals and concluded HOLD/no action — wait for NEW information
 - All research shows HOLD/WATCH with no strong signals
 - Positions are within normal ranges
 - No pending orders exist
@@ -21,12 +22,13 @@ Do NOT escalate when:
 const LIVE_RULES = `
 Escalate (true) when:
 - A position is near its stop loss or take-profit target
-- A stock has a BUY or SELL research signal with high confidence (>=0.7)
-- A significant price move (>2%) creates a new entry/exit opportunity
+- A stock has a BUY or SELL research signal with high confidence (>=0.7) AND it was NOT already analyzed in the last Sonnet decision
+- A significant price move (>2%) creates a new entry/exit opportunity since the last analysis
 - A pending order might fill imminently
-- Market conditions have materially changed
+- Market conditions have materially changed since the last Sonnet decision
 
 Do NOT escalate when:
+- The last Sonnet decision already analyzed these same signals and concluded HOLD/no action — wait for NEW information
 - All research shows HOLD/WATCH with no strong signals
 - Positions are within normal ranges
 - No pending orders exist

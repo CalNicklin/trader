@@ -307,6 +307,10 @@ async function onActiveTradingTick(): Promise<void> {
 			.from(trades)
 			.where(eq(trades.status, "SUBMITTED"));
 
+		const lastDecisionContext = lastAgentResponse
+			? `\nLast Sonnet decision (this session): ${lastAgentResponse.substring(0, 600)}`
+			: "";
+
 		const scanContext = `Notable changes: ${
 			preFilter.reasons.length > 0 ? preFilter.reasons.join("; ") : "None — routine monitoring tick"
 		}
@@ -329,9 +333,9 @@ Research signals: ${recentResearch.length === 0 ? "None" : JSON.stringify(recent
 Watchlist top scores: ${watchlistItems
 			.slice(0, 5)
 			.map((w) => `${w.symbol}(${w.score})`)
-			.join(", ")}`;
+			.join(", ")}${lastDecisionContext}`;
 
-		// === Tier 2: Haiku quick scan (~$0.02) ===
+		// === Tier 2: Haiku quick scan ===
 		const scan = await runQuickScan(scanContext);
 
 		if (!scan.escalate) {
@@ -345,7 +349,7 @@ Watchlist top scores: ${watchlistItems
 			return;
 		}
 
-		// === Tier 3: Full Sonnet agent loop (~$1.70) ===
+		// === Tier 3: Full Sonnet agent loop ===
 		log.info({ reason: scan.reason }, "Escalating to full Sonnet analysis");
 
 		const recentContext = await buildRecentContext();
