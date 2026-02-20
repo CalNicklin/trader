@@ -634,19 +634,30 @@ For each active watchlist symbol:
 → Naturally prunes watchlist of unmaintained symbols
 ```
 
-### Stage 1: Universe Screening (FMP)
+### Stage 1: Universe Screening (FMP — two-step, Starter tier compatible)
 
 ```
-Sector Rotation Schedule:
-  Monday:    Technology (>£100M market cap)
-  Tuesday:   Healthcare (>£100M market cap)
-  Wednesday: Small-caps all sectors (£50M–£2B)
-  Thursday:  Financial Services (>£100M market cap)
-  Friday:    Consumer Cyclical (>£100M market cap)
+Step 1 — FMP company-screener with country=GB (no exchange= param, which requires Premium):
+  Sector Rotation Schedule:
+    Monday:    Technology (>£100M market cap)
+    Tuesday:   Healthcare (>£100M market cap)
+    Wednesday: Small-caps all sectors (£50M–£2B)
+    Thursday:  Financial Services (>£100M market cap)
+    Friday:    Consumer Cyclical (>£100M market cap)
+
+  Returns US-listed tickers of UK companies (AZN on NYSE, GSK on NYSE, etc.)
+
+Step 2 — For each new candidate, resolve LSE ticker via /search-name:
+  /search-name?query=<companyName>&exchange=LSE → picks primary GBp equity
+  Filters: exchange=LSE, currency=GBp, excludes leveraged ETCs (3LAZ, 3SAZ)
+  Prefers shortest symbol (primary equity, not derivatives)
 
 → Up to 5 new candidates added to watchlist per session
 → Exclusion check before adding
+→ All results logged to agent_logs (phase=discovery) for observability
 ```
+
+**Modules:** `lse-screener.ts` (orchestration) → `lse-resolver.ts` (pure symbol picker) → `fmp.ts` (API calls)
 
 ### Stage 2: News Discovery
 
@@ -929,7 +940,7 @@ The daily summary email includes a section highlighting self-improvement PRs tha
 | **IBKR Gateway** | Quotes, orders, account | Cold restart at 05:00 UTC; random disconnects | Auto-reconnect (5s), alert email (30min cooldown) |
 | **Claude API** | All AI decisions | Rate limit / outage | Logged error, job skipped, no cascading |
 | **Yahoo Finance** | Fundamentals, quotes, volume check | API changes / rate limits | Returns null; risk check rejects BUY on null (conservative) |
-| **FMP** | Stock screening, fallback quotes | 5 req/min limit / key invalid | Graceful skip, discovery halted |
+| **FMP** | Stock screening (country=GB + search-name), fallback quotes | Starter tier: 300 req/min; exchange=LSE on screener requires Premium | Graceful skip, discovery halted; pipeline events logged to agent_logs |
 | **RSS Feeds** | News articles | Feed down / format change | Individual feed failure OK, others continue |
 | **Resend** | Email notifications | API error | Logged, non-critical |
 | **GitHub API** | Self-improvement PRs | Token invalid | PR creation fails, proposal still logged |
@@ -987,7 +998,7 @@ Also resolved:
 | C2 | DAY orders expire silently | No next-day re-evaluation of unfilled orders | Medium |
 | C3 | No partial fill handling | Partial positions may not match intended sizing | Low |
 | C4 | Order monitoring subscription leaks | 1-hour auto-unsub helps but not perfect | Low |
-| E1 | FMP free tier (5 req/min) | Universe growth is slow; if key expires, discovery stops | Medium |
+| E1 | FMP Starter tier (300 req/min, no exchange=LSE on screener) | Two-step discovery (country=GB + search-name) works around limitation; if key expires, discovery stops | Low |
 | G1 | Single-job concurrency lock | Long research blocks other jobs; no priority system | Low |
 | G3 | Position reconciliation periodic, not event-driven | During trading, DB positions may lag behind IBKR (guardian mitigates with price updates) | Low |
 | H1 | No position-level P&L in real-time | Agent must call get_positions + get_quote (guardian keeps DB current every 60s) | Low |

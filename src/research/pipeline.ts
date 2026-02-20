@@ -8,7 +8,9 @@ import { isSymbolExcluded } from "../risk/exclusions.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
 import { analyzeStock } from "./analyzer.ts";
-import { getFMPProfile, screenLSEStocks } from "./sources/fmp.ts";
+import { logPipelineEvent } from "./pipeline-logger.ts";
+import { getFMPProfile } from "./sources/fmp.ts";
+import { createFMPScreenerDeps, screenLSEStocks } from "./sources/lse-screener.ts";
 import { fetchNews, filterNewsForSymbols, type NewsItem } from "./sources/news-scraper.ts";
 import { getYahooFundamentals, getYahooQuote } from "./sources/yahoo-finance.ts";
 import { addToWatchlist, getActiveWatchlist, getStaleSymbols, updateScore } from "./watchlist.ts";
@@ -54,15 +56,27 @@ export async function runResearchPipeline(): Promise<void> {
 			{ researched: toResearch.length, watchlistSize: activeWatchlist.length },
 			"Research pipeline complete",
 		);
+		await logPipelineEvent(getDb(), {
+			phase: "research",
+			message: "Research pipeline complete",
+			data: { researched: toResearch.length, watchlistSize: activeWatchlist.length },
+		});
 	} catch (error) {
 		log.error({ error }, "Research pipeline failed");
+		await logPipelineEvent(getDb(), {
+			phase: "research",
+			message: "Research pipeline failed",
+			level: "ERROR",
+			data: { error: String(error) },
+		}).catch(() => {});
 	}
 }
 
 /** Discover new stocks to add to the watchlist via FMP screener */
 async function discoverNewStocks(): Promise<void> {
 	try {
-		const candidates = await screenLSEStocks();
+		const deps = await createFMPScreenerDeps();
+		const candidates = await screenLSEStocks(deps);
 		const currentWatchlist = await getActiveWatchlist();
 		const currentSymbols = new Set(currentWatchlist.map((w) => w.symbol));
 
@@ -81,8 +95,19 @@ async function discoverNewStocks(): Promise<void> {
 		}
 
 		log.info({ candidates: candidates.length, added }, "Stock discovery complete");
+		await logPipelineEvent(getDb(), {
+			phase: "discovery",
+			message: "Stock discovery complete",
+			data: { candidates: candidates.length, added, watchlistSize: currentWatchlist.length },
+		});
 	} catch (error) {
 		log.error({ error }, "Stock discovery failed");
+		await logPipelineEvent(getDb(), {
+			phase: "discovery",
+			message: "Stock discovery failed",
+			level: "ERROR",
+			data: { error: String(error) },
+		}).catch(() => {});
 	}
 }
 
@@ -176,8 +201,19 @@ ${headlines}`,
 			},
 			"News-driven discovery complete",
 		);
+		await logPipelineEvent(getDb(), {
+			phase: "news_discovery",
+			message: "News-driven discovery complete",
+			data: { unmatchedArticles: unmatched.length, discovered: discovered.length, added },
+		});
 	} catch (error) {
 		log.error({ error }, "News-driven discovery failed");
+		await logPipelineEvent(getDb(), {
+			phase: "news_discovery",
+			message: "News-driven discovery failed",
+			level: "ERROR",
+			data: { error: String(error) },
+		}).catch(() => {});
 	}
 }
 

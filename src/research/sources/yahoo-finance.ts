@@ -103,4 +103,4 @@ export async function getYahooFundamentals(symbol: string): Promise<YahooFundame
 	}
 }
 
-/** @deprecated Use screenLSEStocks() from fmp.ts instead */
+/** @deprecated Use screenLSEStocks() from lse-screener.ts instead */

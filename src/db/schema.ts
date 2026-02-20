@@ -1,4 +1,4 @@
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const trades = sqliteTable("trades", {
 	id: integer("id").primaryKey({ autoIncrement: true }),
@@ -98,15 +98,21 @@ export const riskConfig = sqliteTable("risk_config", {
 		.$defaultFn(() => new Date().toISOString()),
 });
 
-export const exclusions = sqliteTable("exclusions", {
-	id: integer("id").primaryKey({ autoIncrement: true }),
-	type: text("type", { enum: ["SYMBOL", "SECTOR", "SIC_CODE"] }).notNull(),
-	value: text("value").notNull(),
-	reason: text("reason").notNull(),
-	createdAt: text("created_at")
-		.notNull()
-		.$defaultFn(() => new Date().toISOString()),
-});
+export const exclusions = sqliteTable(
+	"exclusions",
+	{
+		id: integer("id").primaryKey({ autoIncrement: true }),
+		type: text("type", { enum: ["SYMBOL", "SECTOR", "SIC_CODE"] }).notNull(),
+		value: text("value").notNull(),
+		reason: text("reason").notNull(),
+		createdAt: text("created_at")
+			.notNull()
+			.$defaultFn(() => new Date().toISOString()),
+	},
+	(table) => ({
+		typeValueIdx: uniqueIndex("exclusions_type_value_unique").on(table.type, table.value),
+	}),
+);
 
 export const agentLogs = sqliteTable("agent_logs", {
 	id: integer("id").primaryKey({ autoIncrement: true }),

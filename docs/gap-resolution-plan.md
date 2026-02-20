@@ -389,13 +389,17 @@ If the system restarts at 15:00, it doesn't run missed jobs.
 
 ---
 
-### E1 — FMP Free Tier Limits Discovery
+### E1 — FMP Screener Discovery — FIXED (Feb 20)
 
-5 req/min severely limits universe growth.
+**Problem:** FMP `/company-screener` with `exchange=LSE` was returning HTTP 402 on free tier. Discovery was completely broken since launch — watchlist stuck at 10 seed stocks.
 
-**Fix:** Accept the limitation. If FMP quota is exhausted for a given run, skip discovery for that session and rely on news-driven discovery (Stage 2) which has no rate limit. Yahoo Finance's `search()` is a text search, not a screener — it can't filter by market cap, sector, or exchange, so it would reintroduce the same problems we've already worked around. The 5 new candidates/day from FMP plus news-driven additions is sufficient for steady universe growth. If faster growth is needed later, upgrade to a paid FMP tier.
+**Fix:** Upgraded to FMP Starter tier ($22/mo, 300 req/min). The `exchange=LSE` param still requires Premium ($59/mo), so implemented a two-step workaround:
+1. Screen with `country=GB` (works on Starter) — returns US-listed UK companies
+2. Resolve LSE tickers via `/search-name?query=<name>&exchange=LSE` (works on Starter)
 
-**Where:** No code change. Acknowledged limitation.
+Added pipeline observability: key events now logged to `agent_logs` table (survive container restarts). Fixed exclusions table duplication (added unique constraint on type+value).
+
+**Where:** `src/research/sources/lse-screener.ts` (new), `src/research/sources/lse-resolver.ts` (new), `src/research/pipeline-logger.ts` (new), `src/research/pipeline.ts` (updated imports + logging), `src/research/sources/fmp.ts` (removed screenLSEStocks, exported fmpFetch).
 
 ---
 
