@@ -11,7 +11,7 @@ import { withRetry } from "../utils/retry.ts";
 import { buildContextEnrichments } from "./context-enrichments.ts";
 import { checkIntentions, clearAllIntentions } from "./intentions.ts";
 import { runQuickScan, runTradingAnalyst } from "./planner.ts";
-import { DAY_PLAN_PROMPT, MINI_ANALYSIS_PROMPT } from "./prompts/trading-analyst.ts";
+import { DAY_PLAN_PROMPT, getMiniAnalysisPrompt } from "./prompts/trading-analyst.ts";
 
 const log = createChildLogger({ module: "orchestrator" });
 
@@ -401,7 +401,7 @@ Escalation reason: ${scan.reason}
 `;
 		}
 
-		const response = await runTradingAnalyst(`${MINI_ANALYSIS_PROMPT}\n\n${fullContext}`);
+		const response = await runTradingAnalyst(`${getMiniAnalysisPrompt()}\n\n${fullContext}`);
 		lastAgentResponse = response.text;
 	} catch (error) {
 		log.error({ error }, "Active trading tick failed");

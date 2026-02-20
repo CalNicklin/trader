@@ -5,7 +5,7 @@ import { agentLogs } from "../db/schema.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
 import { getQuickScanSystem } from "./prompts/quick-scan.ts";
-import { TRADING_ANALYST_SYSTEM } from "./prompts/trading-analyst.ts";
+import { getTradingAnalystSystem } from "./prompts/trading-analyst.ts";
 import { executeTool, toolDefinitions } from "./tools.ts";
 
 const log = createChildLogger({ module: "agent-planner" });
@@ -76,7 +76,7 @@ export async function runTradingAnalyst(
 	userMessage: string,
 	maxIterations: number = 10,
 ): Promise<AgentResponse> {
-	return runAgent(TRADING_ANALYST_SYSTEM, userMessage, toolDefinitions, maxIterations);
+	return runAgent(getTradingAnalystSystem(), userMessage, toolDefinitions, maxIterations);
 }
 
 /** Core agent loop with tool use */
