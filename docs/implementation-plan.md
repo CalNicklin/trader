@@ -1,6 +1,6 @@
 # Implementation Plan
 
-> Step-by-step build order for all four phases. Each step is a single commit. Deploy after each phase and observe for at least one trading week before starting the next.
+> Step-by-step build order for all four phases. Each step is a single commit, developed in a TDD method (if appropriate) following the tdd skill. Deploy after each phase and observe for at least one trading week before starting the next.
 >
 > **Strategy framework:** [strategy-framework.md](./strategy-framework.md) — Adaptive Signal Architecture (ADOPTED). Defines the KPI framework, measurement windows, and rollout discipline that apply across all phases.
 >
