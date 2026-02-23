@@ -178,7 +178,9 @@ export const improvementProposals = sqliteTable("improvement_proposals", {
 	filesChanged: text("files_changed"),
 	prUrl: text("pr_url"),
 	prNumber: integer("pr_number"),
-	status: text("status", { enum: ["PROPOSED", "PR_CREATED", "MERGED", "REJECTED"] })
+	status: text("status", {
+		enum: ["PROPOSED", "PR_CREATED", "ISSUE_CREATED", "MERGED", "REJECTED"],
+	})
 		.notNull()
 		.default("PROPOSED"),
 	createdAt: text("created_at")

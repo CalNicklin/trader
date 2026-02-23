@@ -1,6 +1,8 @@
 # Agentic Process Flow Audit
 
-> Updated 2026-02-20 (Phase 1 gap closure deployed, tick frequency corrected to 10-min). Complete audit of every automated process, decision path, and data flow in the Trader Agent platform.
+> Updated 2026-02-23 (Phase 1 deployed, Adaptive Signal Architecture adopted). Complete audit of every automated process, decision path, and data flow in the Trader Agent platform.
+>
+> **Strategy framework:** [strategy-framework.md](./strategy-framework.md) — Defines the signal architecture, KPI framework, and rollout discipline that govern all phases.
 
 ---
 
@@ -54,7 +56,7 @@
 
 **Stack:** Bun + TypeScript + SQLite (Drizzle ORM) + IBKR (@stoqey/ib) + Claude API + Resend
 
-**Goal:** Autonomously trade UK stocks in an ISA (long-only, cash-only, GBP/LSE) with AI-driven decisions, continuous learning, and strict risk controls.
+**Goal:** Autonomously trade UK and US stocks in an ISA (long-only, cash-only) with signal-driven decisions, continuous learning via champion/challenger governance, and strict risk controls. Strategy evolves from evidence through the Adaptive Signal Architecture ([strategy-framework.md](./strategy-framework.md)).
 
 ---
 
@@ -236,7 +238,7 @@ Every 10 min during market hours:
                              │ always runs
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ TIER 2: Haiku Quick Scan (~$0.001)                           │
+│ TIER 2: Haiku Quick Scan + Momentum Gate (~$0.001)           │
 │                                                              │
 │  Model: claude-haiku-4-5-20251001                            │
 │  Max tokens: 256                                             │
@@ -248,8 +250,19 @@ Every 10 min during market hours:
 │  Decision: { escalate: boolean, reason: string }             │
 │                                                              │
 │  If NOT escalate → log & RETURN                              │
+│                                                              │
+│  ★ PLANNED (Phase 2): Momentum Gate at Tier 2               │
+│  For watchlist candidates, code-level gate evaluates:        │
+│  - trend_alignment ∈ {strong_up, up}                         │
+│  - RSI in [45, 75] range                                     │
+│  - volume_ratio >= 0.8                                       │
+│  - Not overbought                                            │
+│  Gate fail = no Sonnet call, log signal state and skip       │
+│  Gate pass = escalate to Tier 3 with full signal context     │
+│  Config stored in versioned file (strategy journal can       │
+│  propose changes via champion/challenger in Phase 3)         │
 └────────────────────────────┬─────────────────────────────────┘
-                             │ escalate = true
+                             │ escalate = true (+ gate passed)
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
 │ TIER 3: Full Sonnet Agent Loop (~$0.35)                      │
@@ -265,6 +278,12 @@ Every 10 min during market hours:
 │           ★ last agent response (first 800 chars),           │
 │           ★ data completeness (missing quotes flagged),      │
 │           ★ portfolio composition (sector % breakdown)       │
+│           ★ PLANNED: Layer 1 signals (indicators)            │
+│           ★ PLANNED: Layer 2 signals (research quality)      │
+│                                                              │
+│  ★ PLANNED (Phase 2): AI role is contextual judgment —       │
+│  evaluate whether mechanical signals are trustworthy,        │
+│  not score five factors. Override attribution logged.         │
 │                                                              │
 │  Can: place orders, cancel orders, research symbols,         │
 │       check risk, log decisions, log intentions              │
@@ -336,13 +355,15 @@ All trading prompts are **mode-aware** — they read the `PAPER_TRADING` config 
 
 ### Key Prompt Rules (Trading Analyst)
 
-- ISA constraints: long-only, cash-only, GBP/LSE only
+- ISA constraints: long-only, cash-only, LSE + US exchanges
 - Trading philosophy: mode-dependent (see table above)
 - **Always call `get_recent_research` before trading**
 - Research older than 24h → must call `research_symbol` for fresh data
 - Confidence threshold: mode-dependent in prompt, >= 0.7 enforced in code (Gate 2) regardless of mode
 - Risk/reward ratio: mode-dependent in prompt
 - 5-step evaluation: Research → Fundamentals → Technical → Risk → Decision
+
+**PLANNED (Phase 2):** Prompt rewritten as contextual judgment. AI receives momentum-qualified candidates (gate-passed) and evaluates: (1) sustainability of momentum, (2) risk events indicators can't see, (3) position context. Not a 5-factor scoring framework. See [phase2-trading-intelligence.md](./phase2-trading-intelligence.md).
 
 ### Agent Tools (19 total)
 
@@ -705,6 +726,7 @@ For each selected symbol:
 
 ### Watchlist Scoring Algorithm
 
+**Current (pre-Phase 1.2):**
 ```
 score = sentimentScore + confidenceScore + actionBonus
 
@@ -716,13 +738,23 @@ score = sentimentScore + confidenceScore + actionBonus
   Decayed: -5 points per week stale (deactivated at <10)
 ```
 
+**PLANNED (Phase 1.2) — Signal-driven scoring:**
+```
+score = qualityMultiplier × momentumProxy × recencyDecay
+
+  qualityMultiplier = pass → 1.0, marginal → 0.5, fail → 0
+  momentumProxy     = normalize changePercentage from screening (0-100)
+  recencyDecay      = -5 points per 7 days stale
+```
+Kills `SCORING_WEIGHTS` (60% dead code). See [phase1.2-profit-optimisation.md](./phase1.2-profit-optimisation.md).
+
 ### Data Sources Summary
 
 | Source | What | Rate Limit | Fallback |
 |--------|------|-----------|----------|
 | IBKR | Real-time quotes, bars, account, orders | 40 req/sec | FMP |
 | Yahoo Finance | Quotes, fundamentals, volume check | None explicit | Graceful null |
-| FMP | Screener, profiles, quotes | 5 req/min (free tier) | Skip |
+| FMP | Screener, profiles, quotes | 300 req/min (Starter tier) | Skip |
 | RSS (8 feeds) | News articles | 15 feeds/min | Skip |
 
 ---
@@ -800,21 +832,28 @@ buildLearningBrief():
 
 3. Claude (Sonnet) Self-Improvement:
    - Analyze performance data
-   - Propose 1–2 code changes (max 2/week)
+   - Propose 2–3 changes (max 2 PRs + 3 issues per week)
 
-4. Whitelist of modifiable files ONLY:
+4. Two-tier proposal routing:
+
+   ★ DIRECT MODIFICATION (auto-PR, max 2/week):
    ✅ src/agent/prompts/*.ts (system prompts, frameworks)
    ✅ src/research/watchlist.ts (scoring weights)
-   ❌ Core trading logic
-   ❌ Broker code
-   ❌ Database schema
-   ❌ Risk manager hard limits
-   ❌ Order execution code
-
-5. For each proposal:
    → generateCodeChange() via Claude
    → Create GitHub PR automatically
-   → Store to improvement_proposals table
+   → Store to improvement_proposals (status: PR_CREATED)
+
+   ★ SUGGESTION (auto-issue, max 3/week):
+   Any other file — the agent can propose changes to:
+   ⚡ src/risk/limits.ts (hardcoded limits, position sizes, thresholds)
+   ⚡ src/risk/manager.ts (risk pipeline logic)
+   ⚡ src/broker/* (broker configuration)
+   ⚡ src/scheduler/cron.ts (job timing)
+   ⚡ src/db/schema.ts (schema changes)
+   ⚡ Any other code it believes needs changing
+   → Create GitHub issue with evidence and proposed change
+   → Store to improvement_proposals (status: ISSUE_CREATED)
+   → Human reviews and implements (or rejects)
 ```
 
 ### Learning Loop Diagram
@@ -864,8 +903,8 @@ Sunday branch:
   Self-Improvement
     → Analyzes all of the above
     → ★ Wilson score pause check
-    → Proposes prompt/scoring changes
-    → Creates PRs on GitHub
+    → Proposes prompt/scoring changes → auto-PR (whitelisted files)
+    → ★ Proposes limit/config/code changes → auto-issue (any file)
 ```
 
 ---
@@ -884,9 +923,9 @@ Sunday branch:
 
 **Email subject format:** `+£X.XX | Daily Trading Summary 2026-02-17` (color-coded positive/negative)
 
-### Stale PR Alerts
+### Stale PR / Issue Alerts
 
-The daily summary email includes a section highlighting self-improvement PRs that have been open for >7 days, with an amber background. This ensures improvement proposals don't accumulate unnoticed.
+The daily summary email includes a section highlighting self-improvement PRs that have been open for >7 days, with an amber background. This ensures improvement proposals don't accumulate unnoticed. GitHub issues created by the agent (for changes outside the auto-modifiable file scope) are also tracked in the `improvement_proposals` table with status `ISSUE_CREATED`.
 
 ### Alert Emails
 
@@ -927,7 +966,7 @@ The daily summary email includes a section highlighting self-improvement PRs tha
 | `tradeReviews` | Trade lessons | tradeId, outcome, reasoningQuality, lessonLearned, tags | Trade review job |
 | `weeklyInsights` | Pattern discoveries | category, insight, actionable, severity, data | Pattern analysis |
 | `tokenUsage` | API cost tracking | job, inputTokens, outputTokens, estimatedCostUsd | Every Claude call |
-| `improvementProposals` | Self-improvement PRs | title, description, filesChanged, prUrl, status | Self-improvement |
+| `improvementProposals` | Self-improvement PRs + issues | title, description, filesChanged, prUrl, status (PR_CREATED/ISSUE_CREATED/MERGED/REJECTED) | Self-improvement |
 | `riskConfig` | Configurable risk params | key, value, description | Seed (editable) |
 | `exclusions` | Blocked symbols/sectors | type, value, reason | Seed + manual |
 
@@ -1013,8 +1052,40 @@ Also resolved:
 | **Low-Medium** | 1 | B4 |
 | **Low** | 6 | C3, C4, E1, G1, G3, H1 |
 
-### Phase 2 Planned (Technical Indicators + Expert Prompts)
+### Planned Phases (Signal Architecture)
 
-1. **Technical indicator engine** — RSI, SMA, MACD, Bollinger Bands, ATR (pure math, zero AI cost)
-2. **Expert prompt rewrite** — 5-factor scoring framework replacing vague "analyze this stock"
-3. **ATR-based position sizing** — 2x ATR stops instead of fixed 3%, 1% portfolio risk per trade
+> All phases governed by the Adaptive Signal Architecture ([strategy-framework.md](./strategy-framework.md)). Each phase has an explicit exit gate. KPIs measured over rolling windows (20-trade for signal metrics, 4-week for calendar metrics).
+
+**Phase 1.2 — Quick Wins** ([phase1.2-profit-optimisation.md](./phase1.2-profit-optimisation.md))
+- Quality filter replacing 4-dimension scoring (Layer 2 research signals)
+- Signal-driven watchlist scoring (kill SCORING_WEIGHTS dead code)
+- Momentum screening (all sectors daily, not sector rotation)
+- Exit gate: structured signal fields for all analyzed symbols, scoring correlates with momentum
+
+**Phase 1.5 — US Stock Support** ([phase1.5-us-stocks.md](./phase1.5-us-stocks.md))
+- Exchange-aware contract building, quotes, risk, execution
+- US screening via FMP (native, no workaround needed)
+- Extended trading hours (08:00–21:00)
+- Exit gate: round-trip friction <0.15% for US trades, stable mixed-exchange operation for 1+ week
+
+**Phase 2 — Trading Intelligence** ([phase2-trading-intelligence.md](./phase2-trading-intelligence.md))
+- Technical indicator engine — RSI, SMA, MACD, Bollinger Bands, ATR (pure math, zero AI cost)
+- **Momentum gate at Tier 2** — code-level gate replaces vibes-based Haiku escalation. Gate fail = no Sonnet call.
+- **Contextual judgment prompt** — AI evaluates trustworthiness of signals, not 5-factor scoring
+- ATR-based position sizing + **trailing stops** (2×ATR below highest close, never moves down)
+- AI override attribution logging for Phase 3 measurement
+- Exit gate: shadow evaluation (gate-only vs gate+AI), AI override non-negative, all signal states logged
+
+**Phase 3 — Learning Depth** ([phase3-learning-depth.md](./phase3-learning-depth.md))
+- Decision scorer with **signal attribution** (full Layer 1 signal state per decision)
+- Per-signal effectiveness measurement (win/loss by signal regime)
+- **Champion/challenger** hypothesis management (Wilson significance z=1.645, n≥30, expectancy guard)
+- Hypotheses can target gate parameters, not just prompt text
+- Self-improvement can codify confirmed hypotheses into gate config
+- Exit gate: signal-tagged data flowing 2+ weeks, at least one hypothesis at ACTIVE status
+
+**Phase 4 — Autonomy Escalation** ([phase4-autonomy-escalation.md](./phase4-autonomy-escalation.md))
+- Rollout ladder: paper → shadow_live → constrained_live → full_live
+- Categorized rollback triggers (strategy vs infrastructure — no false reversions)
+- Weekly governance reporting with attributable impact measurement
+- Exit gate: constrained_live 4+ weeks with positive expectancy, full_live requires human sign-off

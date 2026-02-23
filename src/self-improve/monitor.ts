@@ -21,13 +21,14 @@ import { createChildLogger } from "../utils/logger.ts";
 import { wilsonLower } from "../utils/stats.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
 import { generateCodeChange } from "./code-generator.ts";
-import { createPR } from "./github.ts";
+import { createIssue, createPR } from "./github.ts";
 
 const log = createChildLogger({ module: "self-improve" });
 
 const MAX_PRS_PER_WEEK = 2;
+const MAX_ISSUES_PER_WEEK = 3;
 
-/** Allowed files for self-improvement changes */
+/** Files the agent can modify directly via PR */
 const ALLOWED_FILES = [
 	"src/agent/prompts/trading-analyst.ts",
 	"src/agent/prompts/risk-reviewer.ts",
@@ -102,8 +103,11 @@ ${JSON.stringify(recentInsights, null, 2)}
 ## Trade Reviews
 ${JSON.stringify(recentReviews, null, 2)}
 
-## Allowed Files for Changes
+## Files You Can Modify Directly (PRs)
 ${ALLOWED_FILES.join("\n")}
+
+## Files You Can Suggest Changes To (Issues)
+For ANY other file — hardcoded limits, risk config, broker code, schema, etc. — you can propose changes that will be raised as GitHub issues for human review. Use the same proposal format but specify the file path. Changes outside the allowed list will become issues instead of PRs.
 `;
 
 		// Ask Claude for improvement suggestions
@@ -134,38 +138,77 @@ ${ALLOWED_FILES.join("\n")}
 
 		log.info({ responseLength: text.length }, "Self-improvement analysis complete");
 
-		// Parse proposals and create PRs
+		// Parse proposals and route to PRs or issues
 		const proposals = parseProposals(text);
 
-		for (const proposal of proposals.slice(0, MAX_PRS_PER_WEEK - prCount)) {
-			if (!ALLOWED_FILES.includes(proposal.file)) {
-				log.warn({ file: proposal.file }, "Proposed file change not in allowed list, skipping");
-				continue;
-			}
+		let issuesCreated = 0;
+		const recentIssues = recentProposals.filter((p) => p.status === "ISSUE_CREATED").length;
 
-			try {
-				const change = await generateCodeChange(proposal.file, proposal.description);
-				if (!change) continue;
+		for (const proposal of proposals) {
+			if (ALLOWED_FILES.includes(proposal.file)) {
+				// Whitelisted file → create PR directly
+				if (prCount >= MAX_PRS_PER_WEEK) continue;
 
-				const prUrl = await createPR({
-					title: proposal.title,
-					description: proposal.description,
-					branch: `self-improve/${Date.now()}`,
-					changes: [{ path: proposal.file, content: change }],
-				});
+				try {
+					const change = await generateCodeChange(proposal.file, proposal.description);
+					if (!change) continue;
 
-				if (prUrl) {
-					await db.insert(improvementProposals).values({
+					const prUrl = await createPR({
 						title: proposal.title,
 						description: proposal.description,
-						filesChanged: proposal.file,
-						prUrl,
-						status: "PR_CREATED",
+						branch: `self-improve/${Date.now()}`,
+						changes: [{ path: proposal.file, content: change }],
 					});
-					log.info({ title: proposal.title, prUrl }, "Improvement PR created");
+
+					if (prUrl) {
+						await db.insert(improvementProposals).values({
+							title: proposal.title,
+							description: proposal.description,
+							filesChanged: proposal.file,
+							prUrl,
+							status: "PR_CREATED",
+						});
+						log.info({ title: proposal.title, prUrl }, "Improvement PR created");
+					}
+				} catch (error) {
+					log.error({ title: proposal.title, error }, "Failed to create improvement PR");
 				}
-			} catch (error) {
-				log.error({ title: proposal.title, error }, "Failed to create improvement PR");
+			} else {
+				// Non-whitelisted file → create GitHub issue for human review
+				if (recentIssues + issuesCreated >= MAX_ISSUES_PER_WEEK) continue;
+
+				try {
+					const issueBody = [
+						`**File:** \`${proposal.file}\``,
+						"",
+						`**Finding:** ${proposal.title}`,
+						"",
+						`**Proposed Change:**`,
+						proposal.description,
+						"",
+						"**Context:** This file is outside the agent's auto-modifiable scope. The agent identified this as a potential improvement based on recent trading performance data.",
+					].join("\n");
+
+					const issueUrl = await createIssue({
+						title: proposal.title,
+						body: issueBody,
+						labels: ["agent-suggestion"],
+					});
+
+					if (issueUrl) {
+						await db.insert(improvementProposals).values({
+							title: proposal.title,
+							description: proposal.description,
+							filesChanged: proposal.file,
+							prUrl: issueUrl,
+							status: "ISSUE_CREATED",
+						});
+						issuesCreated++;
+						log.info({ title: proposal.title, issueUrl }, "Improvement issue created");
+					}
+				} catch (error) {
+					log.error({ title: proposal.title, error }, "Failed to create improvement issue");
+				}
 			}
 		}
 	} catch (error) {

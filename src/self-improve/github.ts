@@ -25,6 +25,12 @@ export interface PRRequest {
 	changes: Array<{ path: string; content: string }>;
 }
 
+export interface IssueRequest {
+	title: string;
+	body: string;
+	labels?: string[];
+}
+
 /** Create a PR with file changes */
 export async function createPR(request: PRRequest): Promise<string | null> {
 	const octokit = getOctokit();
@@ -110,6 +116,32 @@ export async function createPR(request: PRRequest): Promise<string | null> {
 		return pr.html_url;
 	} catch (error) {
 		log.error({ error }, "Failed to create PR");
+		return null;
+	}
+}
+
+/** Create a GitHub issue for changes the agent cannot make directly */
+export async function createIssue(request: IssueRequest): Promise<string | null> {
+	const octokit = getOctokit();
+	if (!octokit) return null;
+
+	const config = getConfig();
+	const owner = config.GITHUB_REPO_OWNER!;
+	const repo = config.GITHUB_REPO_NAME;
+
+	try {
+		const { data: issue } = await octokit.issues.create({
+			owner,
+			repo,
+			title: `[Agent Suggestion] ${request.title}`,
+			body: `## Agent-Identified Change Request\n\n${request.body}\n\n---\n*This issue was automatically created by the trading agent's self-improvement system. The agent identified a potential improvement outside its auto-modifiable file scope and is requesting human review.*`,
+			labels: request.labels ?? ["agent-suggestion"],
+		});
+
+		log.info({ issueNumber: issue.number, issueUrl: issue.html_url }, "Issue created");
+		return issue.html_url;
+	} catch (error) {
+		log.error({ error }, "Failed to create issue");
 		return null;
 	}
 }
