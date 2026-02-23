@@ -89,68 +89,26 @@ On a £20K ISA: max £3K per position, max 5 positions, minimum £2K cash. Effec
 
 ---
 
-## Step 1.2.3 — Upgrade research analysis to Sonnet
+## Step 1.2.3 — Research analyzer: quality filter (replaces 4-dimension scoring)
+
+> **Signal Architecture change:** Replaces the Growth/Quality/Momentum/Risk 1-5 scoring with a quality filter that produces Layer 2 research signals. See [strategy-framework.md](./strategy-framework.md) for context.
 
 **Files:** `src/research/analyzer.ts`
 
-**Current behaviour:**
-```typescript
-const response = await client.messages.create({
-  model: config.CLAUDE_MODEL_STANDARD,
-  // ...
-});
-```
-
-`CLAUDE_MODEL_STANDARD` likely resolves to Sonnet, but the audit doc and cost analysis describe research running on Haiku. Verify which model is actually being used and ensure it's Sonnet.
+**Current behaviour:** Generic analysis prompt producing sentiment/action/confidence. No structured signal output.
 
 **What to do:**
-- Confirm `CLAUDE_MODEL_STANDARD` is Sonnet (`claude-sonnet-4-5-20250929` or equivalent)
-- If it's Haiku, change to the Sonnet model
-- The research pipeline runs on 10 symbols/day after market close — this is not latency-sensitive
-
-**Cost impact:** 10 analyses/day × ($0.35 - $0.005) = ~$3.45/day additional = ~$69/month. One good trade from better research insight covers months of the cost difference.
-
-**Also improve the analysis prompt while we're here.** The current prompt is:
-
-```
-"You are a stock analyst specializing in LSE-listed UK equities.
- Analyze the provided data and give a clear, structured assessment."
-```
-
-Replace with a structured evaluation framework:
+- Confirm `CLAUDE_MODEL_STANDARD` is Sonnet (`claude-sonnet-4-5-20250929` or equivalent). If Haiku, change to Sonnet.
+- Replace the analysis prompt with a quality-filter prompt that produces structured signal fields:
 
 ```typescript
-const ANALYSIS_BASE = `You are a senior equity analyst. Evaluate the provided stock data using this framework.
+const ANALYSIS_BASE = `You are a senior equity analyst. Evaluate the provided stock data as a quality filter.
 
-Score each dimension 1-5 and provide a brief justification:
-
-**Growth (1-5):**
-- Revenue trend: growing, stable, or declining?
-- Is the growth rate accelerating or decelerating?
-- How does growth compare to the broader market?
-
-**Quality (1-5):**
-- ROE above 15% = strong. Below 10% = weak.
-- Are margins expanding or compressing?
-- Debt/equity: below 0.5 = healthy, above 1.5 = concerning
-- Is free cash flow positive and growing?
-
-**Momentum (1-5):**
-- Is the price above or below its recent trend?
-- Volume: is recent volume above or below the 20-day average?
-- Has the stock been making higher highs, or lower lows?
-
-**Risk (1-5, where 5 = lowest risk):**
-- Is there an earnings announcement within 10 days?
-- Are there sector headwinds or regulatory risks?
-- How liquid is the stock (volume vs position size)?
-- How volatile is the stock (daily range as % of price)?
-
-**Total:** Sum of all four dimensions (max 20).
-- 16-20: Strong BUY candidate
-- 12-15: WATCH — close to actionable
-- 8-11: HOLD — no compelling case
-- Below 8: Avoid
+Your job is NOT to score dimensions 1-5. Your job IS to answer:
+1. Does this business have real revenue, positive cash flow, and sustainable operations?
+2. Are there specific red flags? (cash burn, debt/equity > 1.5, margin compression, revenue decline, pending regulatory action)
+3. Are there upcoming catalysts? (earnings, contracts, upgrades, sector shifts)
+4. Is the stock cheap, fair, or expensive relative to its sector?
 
 Always respond in valid JSON with these fields:
 - sentiment: number from -1 (very bearish) to 1 (very bullish)
@@ -159,38 +117,43 @@ Always respond in valid JSON with these fields:
 - bullCase: string (max 200 chars)
 - bearCase: string (max 200 chars)
 - analysis: string (max 500 chars)
-- scores: { growth: number, quality: number, momentum: number, risk: number }`;
+- quality_pass: "pass" | "marginal" | "fail"
+- quality_flags: string[] (e.g. ["high_debt", "margin_compression", "cash_burn"])
+- catalyst: "positive" | "neutral" | "negative" | "earnings_imminent"
+- catalyst_detail: string (e.g. "earnings beat + raised guidance")
+- fundamental_value: "undervalued" | "fair" | "overvalued"
+- earnings_proximity: number | null (trading days to next earnings, null if unknown)`;
 ```
 
-This forces the model to evaluate systematically rather than produce vibes. The `scores` field also provides structured data that the scoring algorithm can use later (see Step 1.2.4).
+- Store the new signal fields in `rawData` JSON blob alongside existing data
+- These become Layer 2 research signals measurable by the Phase 3 learning loop
 
-**Test:** Run the new prompt on a known stock (e.g., SHEL) with real Yahoo data. Verify the response includes all four dimension scores and the total maps correctly to the action recommendation.
+**Cost impact:** Same as before — 10 analyses/day on Sonnet. ~$3.45/day additional if upgrading from Haiku.
+
+**Test:** Run the new prompt on a known stock (e.g., SHEL) with real Yahoo data. Verify the response includes `quality_pass`, `quality_flags`, `catalyst`, `fundamental_value`, and `earnings_proximity`.
 
 ---
 
-## Step 1.2.4 — Fix the watchlist scoring algorithm
+## Step 1.2.4 — Signal-driven watchlist scoring (replaces dead-code weights)
 
-**Files:** `src/research/watchlist.ts`
+> **Signal Architecture change:** Kills `SCORING_WEIGHTS` (60% dead code) and replaces with a formula driven by Layer 2 research signals from Step 1.2.3. See [strategy-framework.md](./strategy-framework.md) for context.
 
-**Current problem:** Three of five declared scoring weights are dead code:
+**Files:** `src/research/watchlist.ts`, `src/research/pipeline.ts`
 
-```typescript
-export const SCORING_WEIGHTS = {
-  sentimentWeight: 0.3,    // USED
-  confidenceWeight: 0.2,   // USED
-  fundamentalWeight: 0.25, // DEAD CODE
-  momentumWeight: 0.15,    // DEAD CODE
-  liquidityWeight: 0.1,    // DEAD CODE
-};
-```
-
-The actual score is just `sentiment × 0.3 + confidence × 0.2 + action_bonus`. A stock with terrible fundamentals but positive sentiment scores the same as one with excellent fundamentals.
+**Current problem:** Three of five declared scoring weights are dead code. The actual score is just `sentiment × 0.3 + confidence × 0.2 + action_bonus`.
 
 **What to do:**
 
-With Step 1.2.3 adding `scores` to the analysis output, we can now use the full scoring weights. Update `updateScore()`:
+Delete `SCORING_WEIGHTS` entirely. Replace `updateScore()` with a signal-driven formula:
 
 ```typescript
+/**
+ * score = qualityMultiplier × momentumProxy × recencyDecay
+ *
+ * - qualityMultiplier: pass=1.0, marginal=0.5, fail=0 (from research quality_pass)
+ * - momentumProxy: normalize changePercentage from screening (0-100)
+ * - recencyDecay: -5 points per 7 days stale
+ */
 export async function updateScore(symbol: string): Promise<number> {
   const db = getDb();
   const latestResearch = await db
@@ -203,36 +166,25 @@ export async function updateScore(symbol: string): Promise<number> {
   if (latestResearch.length === 0) return 0;
 
   const r = latestResearch[0]!;
-  const sentimentScore = (((r.sentiment ?? 0) + 1) / 2) * 100;
-  const confidenceScore = (r.confidence ?? 0) * 100;
+  const rawData = r.rawData ? JSON.parse(r.rawData) : null;
 
-  // Parse dimension scores from analysis data if available
-  let fundamentalScore = 50; // neutral default
-  let momentumScore = 50;
-  let liquidityScore = 50;
+  // Quality multiplier from Layer 2 signal
+  const qualityPass = rawData?.quality_pass ?? "marginal";
+  const qualityMultiplier =
+    qualityPass === "pass" ? 1.0 :
+    qualityPass === "marginal" ? 0.5 : 0;
 
-  try {
-    const rawData = r.rawData ? JSON.parse(r.rawData) : null;
-    if (rawData?.scores) {
-      // Dimension scores are 1-5, normalize to 0-100
-      fundamentalScore = ((rawData.scores.quality ?? 3) / 5) * 100;
-      momentumScore = ((rawData.scores.momentum ?? 3) / 5) * 100;
-      liquidityScore = ((rawData.scores.risk ?? 3) / 5) * 100;
-    }
-  } catch { /* use defaults */ }
+  // Momentum proxy: normalize changePercentage to 0-100
+  // changePercentage from screening typically ranges -10% to +20%
+  const changePct = rawData?.quote?.changePercentage ?? rawData?.changePercentage ?? 0;
+  const momentumProxy = Math.max(0, Math.min(100, (changePct + 10) * (100 / 30)));
 
-  const actionBonus =
-    r.suggestedAction === "BUY" ? 20 :
-    r.suggestedAction === "WATCH" ? 5 : 0;
+  // Recency decay: -5 points per 7 days stale
+  const lastResearched = r.createdAt ? new Date(r.createdAt) : new Date();
+  const daysSinceResearch = (Date.now() - lastResearched.getTime()) / (1000 * 60 * 60 * 24);
+  const recencyDecay = Math.max(0, 1 - (daysSinceResearch / 7) * 0.05 * 100 / 100);
 
-  const score =
-    sentimentScore * SCORING_WEIGHTS.sentimentWeight +
-    confidenceScore * SCORING_WEIGHTS.confidenceWeight +
-    fundamentalScore * SCORING_WEIGHTS.fundamentalWeight +
-    momentumScore * SCORING_WEIGHTS.momentumWeight +
-    liquidityScore * SCORING_WEIGHTS.liquidityWeight +
-    actionBonus;
-
+  const score = qualityMultiplier * momentumProxy * recencyDecay;
   const clampedScore = Math.max(0, Math.min(100, score));
 
   await db
@@ -244,19 +196,23 @@ export async function updateScore(symbol: string): Promise<number> {
 }
 ```
 
-**Store the dimension scores.** The analysis output's `scores` object needs to persist so the scoring algorithm can use it. Add it to the `rawData` JSON blob in `researchSymbol()`:
+**Store the signal fields.** In `pipeline.ts` `researchSymbol()`, update the research insert to include the new signal fields from the analyzer:
 
 ```typescript
-// In pipeline.ts researchSymbol(), update the research insert:
 rawData: JSON.stringify({
   quote,
   fundamentals,
   newsCount: newsItems.length,
-  scores: analysis.scores ?? null, // NEW — dimension scores from analyzer
+  quality_pass: analysis.quality_pass ?? null,
+  quality_flags: analysis.quality_flags ?? [],
+  catalyst: analysis.catalyst ?? null,
+  catalyst_detail: analysis.catalyst_detail ?? null,
+  fundamental_value: analysis.fundamental_value ?? null,
+  earnings_proximity: analysis.earnings_proximity ?? null,
 }),
 ```
 
-**Test:** Mock research with scores `{growth: 4, quality: 5, momentum: 3, risk: 4}`. Verify the composite score is higher than the same stock with `{growth: 2, quality: 2, momentum: 2, risk: 2}`.
+**Test:** Mock research with `quality_pass: "pass"` and high `changePercentage` → high score. Same stock with `quality_pass: "fail"` → score 0 regardless of momentum.
 
 ---
 
@@ -349,6 +305,22 @@ This lets paper trading explore more of the strategy space while live mode stays
 
 ---
 
+## Exit Gate
+
+Phase 1.2 is complete when ALL of the following are met:
+
+- **Signal coverage:** Research pipeline produces structured signal fields (`quality_pass`, `quality_flags`, `catalyst`, `fundamental_value`, `earnings_proximity`) for all analyzed symbols. No regressions in coverage or throughput.
+- **Scoring alignment:** Watchlist ranking correlates with momentum — top-ranked symbols should have positive `changePercentage` and `quality_pass` of "pass" or "marginal". Verify by inspecting top 10 watchlist entries.
+- **Momentum screening:** Discovery pipeline finds candidates across all sectors sorted by momentum, not locked to day-of-week sector rotation.
+- **No regression:** Research pipeline completes within existing time budget. No increase in error rate. Existing positions continue to be researched first.
+
+KPI baselines to establish during this phase (measured over first 2 weeks post-deploy):
+- Research pipeline success rate (target: >95%)
+- Average watchlist score distribution (establish baseline for Phase 2 comparison)
+- Discovery hit rate: % of discovered stocks that receive a BUY/WATCH recommendation within 7 days
+
+---
+
 ## What Does NOT Change
 
 - **Phase structure**: 1 → 1.2 → 1.5 → 2 → 3 (1.2 slots in during observation)
@@ -399,9 +371,9 @@ Step 1.2.6  Paper trading aggression   — 2 files, paper-only changes
 |------|--------|------|
 | `src/research/sources/lse-screener.ts` | MODIFY | Replace sector rotation with momentum screening |
 | `src/risk/limits.ts` | MODIFY | Concentrated positions, paper overrides |
-| `src/research/analyzer.ts` | MODIFY | Structured analysis prompt, confirm Sonnet model |
-| `src/research/watchlist.ts` | MODIFY | Use all 5 scoring weights |
-| `src/research/pipeline.ts` | MODIFY | Pass dimension scores to rawData |
+| `src/research/analyzer.ts` | MODIFY | Quality filter prompt with Layer 2 signal output, confirm Sonnet model |
+| `src/research/watchlist.ts` | MODIFY | Signal-driven scoring: quality × momentum × recency (kill SCORING_WEIGHTS) |
+| `src/research/pipeline.ts` | MODIFY | Store Layer 2 signal fields in rawData |
 | `src/research/sources/yahoo-finance.ts` | MODIFY | Additional fundamentals + earnings date |
 | `src/agent/prompts/trading-mode.ts` | MODIFY | More aggressive paper context |
 

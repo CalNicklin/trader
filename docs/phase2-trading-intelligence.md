@@ -336,9 +336,9 @@ low52w: real("low_52w"),
 
 ---
 
-## 2. Expert Prompt Rewrite
+## 2. Contextual Judgment Prompt (replaces multi-factor scoring)
 
-Replace the current `TRADING_ANALYST_SYSTEM` prompt. The current one is ~40 lines of generic advice. The new one is a structured multi-factor framework.
+> **Signal Architecture change:** The AI's job is NOT to score five factors. It's to evaluate whether the mechanical signals (from the momentum gate and indicator engine) are trustworthy in context. The gate handles the quantitative filtering; the AI handles the qualitative judgment. See [strategy-framework.md](./strategy-framework.md).
 
 ### Current Prompt Problems
 
@@ -352,148 +352,109 @@ Replace the current `TRADING_ANALYST_SYSTEM` prompt. The current one is ~40 line
 ### New Prompt: `TRADING_ANALYST_SYSTEM`
 
 ```typescript
-export const TRADING_ANALYST_SYSTEM = `You are an expert equity trader managing a UK Stocks & Shares ISA on the London Stock Exchange.
+export const TRADING_ANALYST_SYSTEM = `You are an expert equity trader managing a UK Stocks & Shares ISA.
 
 ## Constraints (ISA Rules — Non-Negotiable)
 - Cash account only (no margin, no leverage)
 - Long only (no short selling)
-- GBP denominated, LSE-listed equities only
+- LSE and US (NASDAQ/NYSE) listed equities
 
-## Multi-Factor Decision Framework
+## Your Role
 
-Evaluate every opportunity against ALL FIVE factors. Each factor gets a score of -2 to +2. Total score determines action.
+You receive **momentum-qualified candidates** — stocks where mechanical indicators confirm an uptrend with building momentum and adequate volume. The momentum gate has already filtered for:
+- Trend alignment (price above SMA50, SMA20 > SMA50)
+- RSI in the 45-75 range (building, not exhausted)
+- Volume at least 80% of 20-day average
+- Not overbought (RSI < 75)
 
-### Factor 1: TREND (Weight: High)
-Using the technical indicators provided:
-- **+2**: Strong uptrend — price > SMA20 > SMA50, SMA50 > SMA200 (if available)
-- **+1**: Uptrend with consolidation — price > SMA50 but pulled back below SMA20
-- **0**: No clear trend — mixed MA signals, sideways price action
-- **-1**: Weakening — price below SMA50, former uptrend breaking down
-- **-2**: Strong downtrend — price < SMA20 < SMA50
+Your job is NOT to re-evaluate what the indicators already tell you.
+Your job IS to identify reasons the signals might be misleading.
 
-NEVER buy into a strong downtrend. A cheap stock getting cheaper is not a bargain.
+## For Each Candidate, Evaluate:
 
-### Factor 2: MOMENTUM (Weight: High)
-- **+2**: RSI 40-60 with bullish MACD crossover — fresh momentum building from a non-overbought level
-- **+1**: RSI 55-70 with positive MACD histogram — established momentum, not yet extended
-- **0**: RSI 45-55, MACD flat — no directional momentum
-- **-1**: RSI > 70 or negative MACD crossover — overbought or momentum fading
-- **-2**: RSI > 80 or RSI < 30 with no reversal signal — extreme that usually reverses
+### 1. SUSTAINABILITY — Is this momentum real?
+- Recent catalyst (earnings beat, upgrade, sector rotation) → supports entry
+- No identifiable driver → caution, may be noise
+- Negative catalyst masked by market-wide rally → avoid
 
-Best entries combine trend alignment WITH momentum confirmation. Trend without momentum = too early. Momentum without trend = too risky.
+### 2. RISK EVENTS — Is there something the indicators can't see?
+- Earnings within 5 trading days → flag (could accelerate OR reverse)
+- Regulatory/legal risk mentioned in research → flag
+- Sector rotation away from this name → flag
 
-### Factor 3: VALUE (Weight: Medium)
-Compare against sector peers where possible:
-- **+2**: P/E significantly below sector median, strong ROE, growing revenue, healthy margins
-- **+1**: Reasonable valuation with at least one standout metric (high ROE, low debt, margin expansion)
-- **0**: Fairly valued — no clear discount or premium
-- **-1**: Expensive on most metrics but with growth justification
-- **-2**: Extreme overvaluation or deteriorating fundamentals (margin compression, rising debt, revenue decline)
+### 3. POSITION CONTEXT — Does this trade fit the portfolio?
+- Sector concentration after this trade
+- Correlation with existing positions
+- Available risk budget
 
-Value matters more for position entries than for short-term momentum trades.
+## Output For Each Candidate:
+- **act**: boolean — should we enter?
+- **confidence**: 0.0–1.0
+- **reasoning**: why act or why pass (max 200 chars)
+- **override_reason**: if passing on a gate-qualified candidate, structured reason (e.g. "earnings_imminent", "no_catalyst", "sector_concentrated", "extended_rally")
+- If acting: **limitPrice**, **stopLoss** (2×ATR from indicators), **shares** (from risk budget)
 
-### Factor 4: CATALYST (Weight: Medium)
-- **+2**: Clear, recent, positive catalyst — strong earnings beat, major contract win, analyst upgrade, sector tailwind
-- **+1**: Mild positive catalyst or supportive macro environment
-- **0**: No catalyst — stock is doing nothing newsworthy
-- **-1**: Uncertainty — upcoming earnings, regulatory risk, sector headwinds
-- **-2**: Negative catalyst active — profit warning, investigation, sector crash
+## Position Management
 
-NEVER initiate a new position within 5 trading days of an earnings announcement if you don't know the date. Use the research tool to check.
-
-### Factor 5: RISK/REWARD (Weight: Critical — Veto Power)
-Calculate using ATR-based levels, not fixed percentages:
-- **Entry**: Current price or limit price
-- **Stop loss**: Entry minus (2 × ATR). This is the volatility-adjusted stop.
-- **Target**: Entry plus (3 × ATR) minimum. Aim for 1.5:1 reward-to-risk ratio using ATR.
-- **Risk per trade**: The monetary loss if stop is hit. Must be acceptable relative to portfolio.
-
-If risk/reward < 1.5:1 using ATR levels, DO NOT TRADE regardless of other factors.
-
-### Scoring
-
-| Total Score | Action |
-|------------|--------|
-| +6 to +10 | Strong BUY — high conviction, full position size |
-| +3 to +5 | BUY — good setup, standard position size |
-| +1 to +2 | WATCH — almost there, set a price alert via log_intention |
-| -2 to 0 | HOLD (existing) or skip (new) |
-| Below -2 | SELL existing positions or avoid entirely |
-
-**Confidence mapping**: Map the score to confidence:
-- Score +6 or higher → confidence 0.9
-- Score +5 → confidence 0.85
-- Score +4 → confidence 0.8
-- Score +3 → confidence 0.75
-- Score +2 or below → do not trade (confidence < 0.7)
-
-## Position Sizing
-
-Use ATR to determine position size, not fixed percentages:
-1. Calculate risk per share = 2 × ATR
-2. Determine acceptable portfolio risk = 1% of portfolio value per trade
-3. Max shares = acceptable risk / risk per share
-4. Cross-check against the hard limits (5% of portfolio, £50k cap, cash reserve)
-5. Take the MINIMUM of all constraints
-
-Example: Stock at 2000p, ATR = 40p. Risk per share = 80p. Portfolio = £100k.
-Acceptable risk = £1,000. Max shares = 1,000/0.80 = 1,250 shares.
-Position value = 1,250 × 20.00 = £25,000 (2.5% of portfolio — within limits).
-
-## Stop Loss and Target Setting
-
-When placing a trade, ALWAYS:
-1. Calculate stop loss = entry - (2 × ATR). Use this, not a fixed 3%.
-2. Calculate initial target = entry + (3 × ATR). This is the minimum target.
-3. Log these levels via log_intention for the Guardian to monitor.
-
-A stock with 1% daily ATR gets a 2% stop. A stock with 4% daily ATR gets an 8% stop — but the POSITION SIZE is proportionally smaller, so the monetary risk is the same.
+For existing positions:
+- Check if trailing stop should trigger (Guardian handles this automatically, but flag if you see reasons to exit early)
+- Evaluate if the thesis has changed based on new information
+- Recommend: hold, exit early, or let trailing stop manage
 
 ## Available Tools
 You have access to these tools — use them proactively:
 - **get_watchlist**: See all tracked stocks with scores and technical indicators
-- **get_recent_research**: Check existing research (sentiment, bull/bear case, action)
+- **get_recent_research**: Check existing research (quality filter, catalyst, bull/bear case)
 - **research_symbol**: Run FRESH research. Use if stale (>24h) or missing. Always before trading.
 - **get_quote / get_multiple_quotes**: Current market prices
-- **get_historical_bars**: Price history (indicators are pre-computed — use this for additional manual analysis)
+- **get_historical_bars**: Price history (indicators are pre-computed)
 - **get_account_summary / get_positions**: Portfolio state
 - **check_risk / get_max_position_size**: Risk checks (mandatory before trading)
 - **place_trade**: Execute a trade
 - **cancel_order**: Cancel a pending order
 - **get_recent_trades**: Trading history
-- **search_contracts**: Find LSE-listed stocks
+- **search_contracts**: Find stocks (LSE and US exchanges)
 - **log_decision**: Record observations to audit trail
-- **log_intention**: Record a conditional plan for future ticks (e.g., "buy SHEL if it pulls back to 2450p")
-
-## Process
-
-1. Review the data provided (positions, indicators, research, learning brief)
-2. Score each opportunity against the 5 factors
-3. Only act on total score ≥ +3 (confidence ≥ 0.75)
-4. Always call check_risk before place_trade
-5. Set ATR-based stop loss and target
-6. If you see an opportunity that isn't ready yet, use log_intention to record the conditions
+- **log_intention**: Record a conditional plan for future ticks
 
 ## Learning From Experience
 You receive a learning brief with insights from recent trade analysis.
-Treat [CRITICAL] and [WARNING] items as hard constraints — override your default analysis if they conflict.
-If your strategy journal lists a hypothesis as CONFIRMED, incorporate it into your scoring.
+Treat [CRITICAL] and [WARNING] items as hard constraints.
+If your strategy journal lists a hypothesis as CONFIRMED, incorporate it.
 `;
 ```
+
+### AI Override Attribution Logging
+
+When the AI passes on a gate-qualified candidate, the override reason is logged as a structured field for Phase 3 measurement:
+
+```typescript
+interface AIOverrideLog {
+  symbol: string;
+  gateResult: "passed";
+  aiDecision: "act" | "pass";
+  overrideReason: string | null; // null if acting, structured reason if passing
+  confidence: number;
+  signalState: Record<string, unknown>; // full signal snapshot at decision time
+  timestamp: string;
+}
+```
+
+Phase 3's decision scorer measures the AI's hit rate on contextual overrides: when the AI passes on a gate-qualified stock, was the stock's subsequent performance better or worse than acting would have been?
 
 ### New Prompt: `MINI_ANALYSIS_PROMPT`
 
 ```typescript
-export const MINI_ANALYSIS_PROMPT = `Analyze current market conditions and portfolio using the multi-factor framework.
+export const MINI_ANALYSIS_PROMPT = `Analyze current market conditions and portfolio.
 
 For each position:
-- Check if stop loss or target levels have been hit (use ATR-based levels, not fixed %)
-- Score the current setup — has the thesis changed?
-- Recommend: hold, tighten stop, take partial profit, or exit
+- Has the thesis changed? Any new risk events?
+- Is the trailing stop at an appropriate level?
+- Recommend: hold, exit early, or let trailing stop manage
 
-For watchlist opportunities:
-- Score each opportunity using all 5 factors (trend, momentum, value, catalyst, risk/reward)
-- Only recommend entries scoring +3 or higher
+For gate-qualified watchlist candidates:
+- Evaluate sustainability, risk events, and position context
+- Only recommend entries where you see genuine conviction
 - Calculate ATR-based position size, stop, and target
 
 For pending orders:
@@ -502,33 +463,35 @@ For pending orders:
 For logged intentions from previous ticks:
 - Have any conditions been met? If so, evaluate and potentially act.
 
-Be decisive. If the data supports action, take it. If not, state clearly why and move on.`;
+Be decisive. The gate has already filtered for momentum. Your job is the sanity check.`;
 ```
 
 ### New Prompt: `DAY_PLAN_PROMPT`
 
 ```typescript
-export const DAY_PLAN_PROMPT = `Create today's trading plan using the multi-factor framework.
+export const DAY_PLAN_PROMPT = `Create today's trading plan.
 
 Review:
 1. Overnight news and any catalysts affecting positions or watchlist
-2. Current positions — score each against the 5 factors. Flag any where the thesis has weakened.
-3. Watchlist opportunities — which stocks score +3 or higher? What price levels would you need to see?
-4. Risk budget — how much capital is available for new positions? How many position slots are open?
+2. Current positions — any thesis changes? Risk events? Let trailing stops manage or exit early?
+3. Watchlist — which gate-qualified candidates look most promising? What would change your mind?
+4. Risk budget — how much capital is available? How many position slots are open?
 5. Learning brief — incorporate any warnings or confirmed hypotheses
 
 Output:
-- Positions to monitor with specific ATR-based stop and target levels
-- Watchlist stocks to watch with entry conditions (price level + indicator confirmation needed)
+- Positions to monitor with specific notes on thesis strength
+- Watchlist stocks to watch with entry conditions
 - Maximum new positions today (considering open positions and risk budget)
 - Any sectors or patterns to avoid per the learning brief
 
-Be specific about price levels and conditions. Use the indicator data provided.`;
+Be specific about conditions. The indicators are provided — focus on what they can't tell you.`;
 ```
 
 ---
 
-## 3. Volatility-Adjusted Sizing
+## 3. Volatility-Adjusted Sizing + Trailing Stops
+
+> **Signal Architecture change:** Extends ATR sizing with trailing stop logic. Replaces fixed profit targets with trend-following exits. See [strategy-framework.md](./strategy-framework.md).
 
 ### Changes to `src/risk/limits.ts`
 
@@ -542,6 +505,7 @@ PER_TRADE_STOP_LOSS_PCT: 3,
 STOP_LOSS_ATR_MULTIPLIER: 2,    // Stop at 2 × ATR below entry
 TARGET_ATR_MULTIPLIER: 3,       // Minimum target at 3 × ATR above entry
 RISK_PER_TRADE_PCT: 1,          // Risk 1% of portfolio per trade
+TRAILING_STOP_ATR_MULTIPLIER: 2, // Trail stop at 2 × ATR below highest close
 ```
 
 ### Changes to `src/risk/manager.ts`
@@ -600,6 +564,61 @@ export async function getAtrPositionSize(
 }
 ```
 
+### Trailing Stop Logic
+
+> Replaces fixed profit targets with trend-following exits. The stop only moves up, never down.
+
+**Schema change — add to `positions` table:**
+
+```typescript
+highWaterMark: real("high_water_mark"),     // highest close since entry
+trailingStopPrice: real("trailing_stop_price"), // current trailing stop level
+```
+
+**Guardian integration — `src/broker/guardian.ts`:**
+
+```typescript
+/**
+ * Update trailing stops during each Guardian tick.
+ * For each position with ATR data:
+ * 1. If current price > highWaterMark, update highWaterMark
+ * 2. Recalculate trailingStopPrice = highWaterMark - (2 × ATR)
+ * 3. Never move stop down — only up
+ * 4. If current price <= trailingStopPrice, trigger sell
+ */
+async function updateTrailingStops(positions: Position[]): Promise<void> {
+  for (const pos of positions) {
+    if (!pos.highWaterMark || !pos.atr14) continue;
+
+    const currentPrice = pos.currentPrice ?? 0;
+    const newHighWater = Math.max(pos.highWaterMark, currentPrice);
+    const newTrailingStop = newHighWater - (pos.atr14 * HARD_LIMITS.TRAILING_STOP_ATR_MULTIPLIER);
+
+    // Never move stop down
+    const effectiveStop = Math.max(newTrailingStop, pos.trailingStopPrice ?? 0);
+
+    await db.update(positions).set({
+      highWaterMark: newHighWater,
+      trailingStopPrice: effectiveStop,
+    }).where(eq(positions.id, pos.id));
+
+    if (currentPrice <= effectiveStop && currentPrice > 0) {
+      // Trigger trailing stop sell
+      await placeTrade({
+        symbol: pos.symbol,
+        exchange: pos.exchange,
+        side: "SELL",
+        quantity: pos.quantity,
+        orderType: "MKT",
+        reason: `Trailing stop hit: price ${currentPrice} <= stop ${effectiveStop.toFixed(2)}`,
+      });
+    }
+  }
+}
+```
+
+**On position entry:** Set `highWaterMark = entryPrice` and `trailingStopPrice = entryPrice - (2 × ATR)`.
+
 ### Changes to `src/agent/tools.ts`
 
 Update the `get_max_position_size` tool to accept optional ATR:
@@ -653,49 +672,113 @@ export function calculateStopLoss(entryPrice: number, atr?: number): number {
 
 ### Changes to `src/agent/orchestrator.ts`
 
-**In `onActiveTradingTick()` — Tier 3 context building:**
+> **Signal Architecture change:** Tier 2 gains a code-level momentum gate. Candidates that fail the gate are logged but never escalated to Tier 3 (Sonnet). This replaces vibes-based Haiku escalation with deterministic signal-based filtering. See [strategy-framework.md](./strategy-framework.md).
+
+**Momentum gate at Tier 2:**
 
 ```typescript
-// After getting position quotes, before runTradingAnalyst:
-import { computeIndicators, formatIndicatorSummary } from "../analysis/indicators.ts";
+// New file or section: src/analysis/momentum-gate.ts
 
-// For held positions — compute indicators
-const positionIndicators: string[] = [];
-for (const pos of positionRows) {
-  try {
-    const bars = await getHistoricalBars(pos.symbol, "3 M");
-    const indicators = computeIndicators(pos.symbol, bars);
-    positionIndicators.push(formatIndicatorSummary(indicators));
-  } catch {
-    positionIndicators.push(`${pos.symbol}: indicators unavailable`);
-  }
+interface MomentumGate {
+  trendAlignment: ("strong_up" | "up")[];
+  rsiRange: [number, number]; // default [45, 75]
+  minVolumeRatio: number;     // default 0.8
+  excludeOverbought: boolean; // default true
 }
 
-// For top watchlist items being considered
-const watchlistIndicators: string[] = [];
-for (const item of watchlistItems.slice(0, 5)) {
-  try {
-    const bars = await getHistoricalBars(item.symbol, "3 M");
-    const indicators = computeIndicators(item.symbol, bars);
-    watchlistIndicators.push(formatIndicatorSummary(indicators));
-  } catch {
-    watchlistIndicators.push(`${item.symbol}: indicators unavailable`);
-  }
+// Stored in versioned config file, not hard-coded
+// Strategy journal (Phase 3) can propose changes to these parameters
+const DEFAULT_GATE: MomentumGate = {
+  trendAlignment: ["strong_up", "up"],
+  rsiRange: [45, 75],
+  minVolumeRatio: 0.8,
+  excludeOverbought: true,
+};
+
+interface GateResult {
+  passed: boolean;
+  reasons: string[];       // why it passed or failed
+  signalState: Record<string, unknown>; // full signal snapshot for Phase 3 logging
 }
 
-// Include in fullContext:
-const indicatorContext = `
-## Technical Indicators (Positions)
-${positionIndicators.join("\n")}
+function evaluateGate(indicators: TechnicalIndicators, gate: MomentumGate): GateResult {
+  const reasons: string[] = [];
+  let passed = true;
 
-## Technical Indicators (Watchlist)
-${watchlistIndicators.join("\n")}
-`;
+  if (!gate.trendAlignment.includes(indicators.trendAlignment as "strong_up" | "up")) {
+    reasons.push(`trend_alignment=${indicators.trendAlignment} (need ${gate.trendAlignment.join("|")})`);
+    passed = false;
+  }
+
+  if (indicators.rsi14 !== null) {
+    if (indicators.rsi14 < gate.rsiRange[0] || indicators.rsi14 > gate.rsiRange[1]) {
+      reasons.push(`rsi=${indicators.rsi14.toFixed(0)} (need ${gate.rsiRange[0]}-${gate.rsiRange[1]})`);
+      passed = false;
+    }
+  }
+
+  if (indicators.volumeRatio !== null && indicators.volumeRatio < gate.minVolumeRatio) {
+    reasons.push(`volume_ratio=${indicators.volumeRatio.toFixed(2)} (need >=${gate.minVolumeRatio})`);
+    passed = false;
+  }
+
+  if (gate.excludeOverbought && indicators.rsiRegime === "overbought") {
+    reasons.push("rsi_overbought");
+    passed = false;
+  }
+
+  if (passed) {
+    reasons.push("all_gates_passed");
+  }
+
+  return {
+    passed,
+    reasons,
+    signalState: {
+      trendAlignment: indicators.trendAlignment,
+      rsi14: indicators.rsi14,
+      rsiRegime: indicators.rsiRegime,
+      volumeRatio: indicators.volumeRatio,
+      macdCrossover: indicators.macdCrossover,
+      atrPercent: indicators.atrPercent,
+      bollingerPercentB: indicators.bollingerPercentB,
+    },
+  };
+}
+```
+
+**Every gate evaluation (pass or fail) logs full signal state** to `agent_logs` for Phase 3 learning loop analysis. Gate fail = no Sonnet call, skip to next candidate.
+
+**In `onActiveTradingTick()` — Tier 2 with momentum gate:**
+
+```typescript
+// For each watchlist candidate being considered for escalation:
+for (const item of watchlistItems.slice(0, 10)) {
+  const indicators = await getIndicatorsForSymbol(item.symbol, "3 M");
+  if (!indicators) continue;
+
+  const gateResult = evaluateGate(indicators, loadGateConfig());
+
+  // Log signal state regardless of pass/fail (Phase 3 needs both)
+  await logAgentAction("GATE_EVALUATION", {
+    symbol: item.symbol,
+    passed: gateResult.passed,
+    reasons: gateResult.reasons,
+    signalState: gateResult.signalState,
+  });
+
+  if (!gateResult.passed) continue; // No Sonnet call — skip
+
+  // Gate passed → escalate to Tier 3 with full context
+  gatePassedCandidates.push({ item, indicators });
+}
+
+// Only gate-passed candidates get Sonnet evaluation
 ```
 
 **In `onPreMarket()` — day plan context:**
 
-Same pattern. Compute indicators for all positions + top 10 watchlist.
+Same pattern. Compute indicators for all positions + top 10 watchlist. No gate filtering for day plan (agent sees everything for planning).
 
 ### Changes to `src/research/pipeline.ts`
 
@@ -774,18 +857,42 @@ export async function getIndicatorsForSymbol(
 
 ---
 
+## Exit Gate
+
+Phase 2 is complete when ALL of the following are met:
+
+- **Gate operating deterministically:** Momentum gate evaluates all watchlist candidates at Tier 2. Gate pass/fail logged with full signal state. No Sonnet calls for gate-failed candidates.
+- **Shadow evaluation (1-2 weeks):** Run gate-only decisions alongside gate+AI decisions in parallel. Track:
+  - Gate-only hit rate: % of gate-passed stocks that would have been profitable entries
+  - Gate+AI hit rate: % of AI-approved entries that were profitable
+  - AI override value-add: did the AI's passes on gate-qualified stocks avoid losses? Measured as: (gate-only expectancy) vs (gate+AI expectancy)
+- **AI override non-negative:** AI override must show non-negative value before full reliance. If AI passes are worse than random (i.e., the stocks it rejected performed better than the ones it approved), reduce AI weight and investigate.
+- **Signal logging:** All signal states (Layer 1 indicators + gate result + AI decision) logged for every evaluation. Phase 3 can query this data.
+- **Trailing stops operating:** Positions have `highWaterMark` and `trailingStopPrice` updating on every Guardian tick. At least one trailing stop adjustment observed in production.
+- **No regression:** Indicator computation completes within tick budget. No increase in Sonnet costs (gate should reduce Sonnet calls).
+
+KPI baselines to establish:
+- Gate pass rate: % of candidates that pass momentum gate (expect 20-40%)
+- AI approval rate: % of gate-passed candidates the AI approves (expect 40-70%)
+- Sonnet call reduction: % fewer Sonnet calls vs pre-gate baseline
+- Signal-level win/loss by `trendAlignment` and `rsiRegime` (initial data for Phase 3)
+
+---
+
 ## Summary of Files Changed/Created
 
 | File | Action | What |
 |------|--------|------|
 | `src/analysis/indicators.ts` | **NEW** | Technical indicator computation + formatting |
-| `src/agent/prompts/trading-analyst.ts` | **REWRITE** | Multi-factor framework prompt |
-| `src/agent/orchestrator.ts` | **MODIFY** | Add indicator computation to Tier 3 + pre-market context |
+| `src/analysis/momentum-gate.ts` | **NEW** | Momentum gate evaluation + config loading |
+| `src/agent/prompts/trading-analyst.ts` | **REWRITE** | Contextual judgment prompt (replaces multi-factor scoring) |
+| `src/agent/orchestrator.ts` | **MODIFY** | Momentum gate at Tier 2, indicator context, AI override logging |
 | `src/agent/tools.ts` | **MODIFY** | Update `get_max_position_size` to accept ATR |
-| `src/risk/limits.ts` | **MODIFY** | Replace fixed stop with ATR multipliers |
+| `src/risk/limits.ts` | **MODIFY** | Replace fixed stop with ATR multipliers, add trailing stop config |
 | `src/risk/manager.ts` | **MODIFY** | Add `getAtrPositionSize()`, update `calculateStopLoss()` |
+| `src/broker/guardian.ts` | **MODIFY** | Add trailing stop logic (`updateTrailingStops()`) |
 | `src/research/pipeline.ts` | **MODIFY** | Compute indicators during research, store 52w range |
 | `src/research/analyzer.ts` | **MODIFY** | Include indicator summary in analysis prompt |
-| `src/db/schema.ts` | **MODIFY** | Add `high52w`, `low52w` to watchlist table |
+| `src/db/schema.ts` | **MODIFY** | Add `high52w`, `low52w` to watchlist; add `highWaterMark`, `trailingStopPrice` to positions |
 
-**Total AI cost impact: $0.** All computation is pure math on existing data.
+**AI cost impact:** Gate should _reduce_ Sonnet costs by filtering candidates before Tier 3. Indicator computation is pure math ($0).

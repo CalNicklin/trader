@@ -12,7 +12,9 @@
 
 ---
 
-## 1. Decision Scorer
+## 1. Decision Scorer + Signal Attribution
+
+> **Signal Architecture change:** The decision scorer now records full signal state with every decision, enabling per-signal effectiveness measurement. AI override hit rate is a first-class KPI. See [strategy-framework.md](./strategy-framework.md).
 
 ### Problem
 
@@ -173,11 +175,31 @@ export const decisionScores = sqliteTable("decision_scores", {
   genuineMiss: integer("genuine_miss", { mode: "boolean" }),
   lesson: text("lesson"),
   tags: text("tags"), // JSON array string
+  // Signal attribution fields (Phase 2+ data)
+  signalState: text("signal_state"),      // JSON: full Layer 1 signal snapshot at decision time
+  gateResult: text("gate_result"),        // "passed" | "failed" | null (null if pre-Phase 2)
+  aiOverrideReason: text("ai_override_reason"), // structured reason if AI passed on gate-qualified stock
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
 ```
+
+### Signal Attribution
+
+Every decision score includes the full signal state at decision time (from Phase 2's gate evaluation logs). This enables:
+
+- **Per-signal effectiveness:** For each Layer 1 signal value, what was the outcome?
+  ```
+  trend_alignment = "strong_up" AND outcome = win  → 73% (n=22)
+  rsi_regime = "bullish" AND outcome = win → 68% (n=15)
+  ```
+- **AI override hit rate:** When the AI passed on a gate-qualified stock, was the stock's subsequent performance better or worse than acting?
+  ```
+  AI said "pass" (earnings_imminent) → stock dropped 4% → good judgment
+  AI said "pass" (no_catalyst) → stock rallied 8% → missed opportunity
+  ```
+- **Gate calibration data:** Which gate parameter values correlate with wins? Feed into Phase 3 hypothesis proposals.
 
 ### Integration with Pattern Analysis
 
@@ -265,7 +287,9 @@ Wednesday/Friday 19:00:
 
 ---
 
-## 2. Strategy Journal
+## 2. Strategy Journal + Champion/Challenger
+
+> **Signal Architecture change:** Hypotheses can now target gate parameters (not just prompt text). Adds a champion/challenger promotion policy with Wilson significance testing, n>=30 minimum sample, expectancy guard, and drawdown constraint. See [strategy-framework.md](./strategy-framework.md).
 
 ### Problem
 
@@ -273,27 +297,39 @@ The system records lessons from individual trades and identifies patterns, but t
 
 ### Design
 
-A **strategy journal** is a living set of hypotheses that the agent builds from evidence and then acts on. It bridges the gap between "we observed a pattern" (weekly insights) and "we should change our behaviour" (trading prompt).
+A **strategy journal** is a living set of hypotheses that the agent builds from evidence and then acts on. It bridges the gap between "we observed a pattern" (weekly insights) and "we should change our behaviour" (trading prompt). Hypotheses can target **gate parameters** (e.g., "lower minVolumeRatio to 0.8") as well as prompt text.
 
-### How Hypotheses Work
+### How Hypotheses Work — Champion/Challenger Model
 
 ```
 Lifecycle:
-  PROPOSED → ACTIVE → CONFIRMED or REJECTED
+  PROPOSED → ACTIVE (challenger) → CONFIRMED (new champion) or REJECTED
 
   PROPOSED:   Pattern analysis identified a potential pattern.
-              Insufficient data to act on it. Monitor.
+              Insufficient data to act on it. No behavioral change. Monitor.
 
-  ACTIVE:     Enough supporting evidence to start using in decisions.
-              Agent should factor this into scoring.
-              Tracked for ongoing validation.
+  ACTIVE:     Shadow-run proposed parameter change alongside current champion
+              for minimum 30 trades. Agent sees this in learning brief as a
+              soft suggestion. Both champion and challenger outcomes tracked.
 
-  CONFIRMED:  Strong evidence over 20+ trades. Permanent strategy element.
-              Self-improvement system may codify into prompt text.
+  CONFIRMED:  Challenger outperforms on win rate AND expectancy without worse
+              drawdown. Promoted via PR (merge is the gate). Becomes new champion.
 
   REJECTED:   Counter-evidence disproved the hypothesis.
-              Kept for reference (don't re-propose the same thing).
+              Kept for reference to prevent re-proposing the same thing.
 ```
+
+### Promotion Thresholds
+
+- **Min sample:** 30 trades under challenger (20 is too noisy for meaningful significance)
+- **Statistical test:** Wilson score lower bound (z=1.645, one-tailed 95%) of challenger win rate must exceed champion point estimate. Champion win rate is measured over the same rolling 30-trade window ending at the same date, so comparison is symmetric. Both sides use the same sample floor (n>=30). Reuse existing `wilsonLower()` from `src/self-improve/monitor.ts`.
+- **Expectancy guard:** Challenger expectancy >= champion expectancy. A higher win rate with smaller wins and larger losses is not an improvement.
+- **Max drawdown:** Challenger peak-to-trough drawdown <= champion × 1.2
+- **No auto-promotion:** PR required, merge is the gate
+
+### Tie-Breaker
+
+When metrics disagree: **expectancy is the single canonical ordering metric.** If expectancy is flat (within 5% relative), prefer lower drawdown. If both are flat, do not promote — the challenger has not demonstrated improvement. This prevents promotion on cosmetic improvements and avoids subjective debate at gate decisions.
 
 ### Database Schema
 
@@ -302,11 +338,17 @@ Lifecycle:
 export const strategyHypotheses = sqliteTable("strategy_hypotheses", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   hypothesis: text("hypothesis").notNull(),
-    // e.g., "Momentum entries in technology sector have higher win rate"
+    // e.g., "Lower minVolumeRatio from 0.8 to 0.6"
   evidence: text("evidence").notNull(),
     // e.g., "8/12 tech momentum trades were wins (67%). Sector avg is 45%."
   actionable: text("actionable").notNull(),
-    // e.g., "Increase confidence by +0.05 for tech momentum setups"
+    // e.g., "Change gate config: minVolumeRatio = 0.6"
+  targetType: text("target_type", {
+    enum: ["gate_param", "prompt", "risk_config"],
+  }).notNull().default("prompt"),
+    // What the hypothesis targets — gate parameters, prompt text, or risk config
+  targetParam: text("target_param"),
+    // Specific parameter name if gate_param (e.g., "minVolumeRatio", "rsiRange")
   category: text("category", {
     enum: ["sector", "timing", "momentum", "value", "risk", "sizing", "general"],
   }).notNull(),
@@ -315,6 +357,11 @@ export const strategyHypotheses = sqliteTable("strategy_hypotheses", {
   }).notNull().default("proposed"),
   supportingTrades: integer("supporting_trades").notNull().default(0),
   winRate: real("win_rate"),
+  championWinRate: real("champion_win_rate"),   // champion's win rate over same window
+  expectancy: real("expectancy"),               // challenger's expectancy per trade
+  championExpectancy: real("champion_expectancy"), // champion's expectancy per trade
+  maxDrawdown: real("max_drawdown"),            // challenger's peak-to-trough drawdown
+  championMaxDrawdown: real("champion_max_drawdown"),
   sampleSize: integer("sample_size").notNull().default(0),
   proposedAt: text("proposed_at")
     .notNull()
@@ -327,22 +374,31 @@ export const strategyHypotheses = sqliteTable("strategy_hypotheses", {
 
 ### Hypothesis Proposal (via Pattern Analysis)
 
-The pattern analyzer already runs Wed/Fri. Extend its prompt to also propose and evaluate hypotheses.
+The pattern analyzer already runs Wed/Fri. Extend its prompt to also propose and evaluate hypotheses. Hypotheses can target gate parameters (not just prompt text).
 
 Add to `PATTERN_ANALYZER_SYSTEM` in `src/learning/prompts.ts`:
 
 ```typescript
 // Append to existing prompt:
 `
-## Strategy Hypotheses
+## Strategy Hypotheses (Champion/Challenger)
 
-You also manage the strategy journal. Based on the data:
+You manage the strategy journal. Hypotheses can target gate parameters, prompt text, or risk config.
+
+Based on the signal-tagged decision data:
 
 1. **Propose new hypotheses** if you see a pattern with ≥5 supporting trades that isn't already tracked.
-2. **Evaluate existing hypotheses** against the latest data. Update status:
-   - PROPOSED → ACTIVE: if supporting evidence reaches ≥10 trades with consistent pattern
-   - ACTIVE → CONFIRMED: if ≥20 trades with stable win rate (±10% from original observation)
-   - ANY → REJECTED: if counter-evidence clearly disproves it (e.g., win rate dropped below 40%)
+   - For gate parameters: "Lower minVolumeRatio from 0.8 to 0.6" (targetType: "gate_param", targetParam: "minVolumeRatio")
+   - For prompt changes: "Add sector rotation awareness" (targetType: "prompt")
+2. **Evaluate existing hypotheses** using champion/challenger comparison:
+   - PROPOSED → ACTIVE: if supporting evidence reaches ≥10 trades with consistent pattern. Start shadow-running.
+   - ACTIVE → CONFIRMED: ONLY when ALL promotion thresholds are met:
+     * n >= 30 trades under challenger
+     * Wilson score lower bound (z=1.645) of challenger win rate > champion point estimate
+     * Challenger expectancy >= champion expectancy
+     * Challenger max drawdown <= champion max drawdown × 1.2
+   - ANY → REJECTED: if counter-evidence disproves it, or challenger fails promotion thresholds after n>=30
+   - **NEVER auto-promote.** CONFIRMED status means "ready for PR" not "deployed."
 
 Include in your response a second JSON array "hypotheses":
 [
@@ -351,11 +407,18 @@ Include in your response a second JSON array "hypotheses":
     "id": null (for propose) | number (for update/reject),
     "hypothesis": "description",
     "evidence": "supporting data from this analysis",
-    "actionable": "what the trading agent should do differently",
+    "actionable": "what should change",
+    "targetType": "gate_param" | "prompt" | "risk_config",
+    "targetParam": "minVolumeRatio" | null,
     "category": "sector" | "timing" | "momentum" | "value" | "risk" | "sizing" | "general",
     "status": "proposed" | "active" | "confirmed" | "rejected",
     "winRate": 0.67,
-    "sampleSize": 12,
+    "championWinRate": 0.55,
+    "expectancy": 1.2,
+    "championExpectancy": 0.9,
+    "maxDrawdown": 0.05,
+    "championMaxDrawdown": 0.04,
+    "sampleSize": 32,
     "rejectionReason": null | "reason"
   }
 ]
@@ -468,10 +531,13 @@ The agent sees this in its learning brief and adjusts its multi-factor scoring a
 
 ### Self-Improvement Integration
 
+> **Signal Architecture change:** Self-improvement can now codify confirmed hypotheses into gate config files, not just prompt text. Gate config is added to the allowed-files list.
+
 The self-improvement system (`src/self-improve/monitor.ts`) already proposes code changes. With the strategy journal:
 
-1. **Confirmed hypotheses** with large sample sizes (n≥30) become candidates for codification into the prompt text (via self-improvement PR).
+1. **Confirmed hypotheses** with large sample sizes (n≥30) become candidates for codification — into prompt text (targetType: "prompt") or gate config (targetType: "gate_param").
 2. The self-improvement prompt is extended to review confirmed hypotheses and decide if any should be permanently embedded.
+3. **Gate config file** (e.g., `config/momentum-gate.json`) is added to the self-improvement allowed-files list, enabling automated PRs that adjust gate parameters.
 
 ```typescript
 // Add to self-improvement context:
@@ -487,10 +553,21 @@ const confirmedHypotheses = await db
 
 // Include in self-improvement prompt:
 `Confirmed strategy hypotheses (candidates for codification):
-${confirmedHypotheses.map(h => `- ${h.hypothesis} (n=${h.sampleSize}, WR=${((h.winRate ?? 0) * 100).toFixed(0)}%): ${h.actionable}`).join("\n")}
+${confirmedHypotheses.map(h => {
+  const target = h.targetType === "gate_param"
+    ? `[GATE: ${h.targetParam}]`
+    : `[PROMPT]`;
+  return `- ${target} ${h.hypothesis} (n=${h.sampleSize}, WR=${((h.winRate ?? 0) * 100).toFixed(0)}%, exp=${h.expectancy?.toFixed(2) ?? "?"}): ${h.actionable}`;
+}).join("\n")}
 
-If any of these are strong enough, propose embedding them into the trading analyst prompt as permanent rules.`
+For gate_param hypotheses: modify the gate config file (config/momentum-gate.json).
+For prompt hypotheses: modify the trading analyst prompt.
+Always create a PR — never auto-deploy.`
 ```
+
+**Allowed files for self-improvement PRs:**
+- `src/agent/prompts/trading-analyst.ts` (existing)
+- `config/momentum-gate.json` (new — gate parameters)
 
 ### Hypothesis Lifecycle Example
 
@@ -530,14 +607,15 @@ Week 8:
 
 | File | Change |
 |------|--------|
-| `src/db/schema.ts` | Add `decisionScores` and `strategyHypotheses` tables |
-| `src/learning/prompts.ts` | Extend `PATTERN_ANALYZER_SYSTEM` with hypothesis management |
-| `src/learning/pattern-analyzer.ts` | Add hypothesis proposal/update logic, add decision score data |
+| `src/db/schema.ts` | Add `decisionScores` (with signal attribution) and `strategyHypotheses` (with champion/challenger fields) tables |
+| `src/learning/prompts.ts` | Extend `PATTERN_ANALYZER_SYSTEM` with champion/challenger hypothesis management |
+| `src/learning/pattern-analyzer.ts` | Add hypothesis proposal/update logic with Wilson significance, add signal-tagged decision score data |
 | `src/learning/context-builder.ts` | Include active/confirmed hypotheses in learning brief |
 | `src/scheduler/cron.ts` | Add `decision_scorer` job at 17:30 |
 | `src/scheduler/jobs.ts` | Register `decision_scorer` in job registry |
-| `src/self-improve/monitor.ts` | Include confirmed hypotheses in self-improvement context |
-| `src/agent/orchestrator.ts` | Include quote data in DECISION-level agent_logs (for scorer) |
+| `src/self-improve/monitor.ts` | Include confirmed hypotheses in self-improvement context; add gate config to allowed files |
+| `src/agent/orchestrator.ts` | Include quote data + signal state in DECISION-level agent_logs (for scorer) |
+| `config/momentum-gate.json` | **NEW** — Versioned gate parameters (self-improvement target) |
 
 ### New DB Tables
 
@@ -563,6 +641,25 @@ Week 8:
 | Missed opportunity analysis (0-3 Haiku) | $0.00-0.015 | $0.00-0.30 |
 | Hypothesis management (within existing pattern analysis call) | $0.00 | $0.00 |
 | **Total Phase 3** | **$0.005-0.02** | **$0.10-0.40** |
+
+---
+
+## Exit Gate
+
+Phase 3 is complete when ALL of the following are met:
+
+- **Decision scorer populating:** Signal-tagged decision scores flowing for 2+ weeks. Every scored decision includes full signal state (Layer 1 + gate result + AI override reason).
+- **Per-signal reporting:** Win/loss report generating with rolling 20-trade windows, broken down by signal regime (e.g., `trend_alignment=strong_up: 73% WR, n=22`).
+- **Champion/challenger active:** At least one hypothesis at ACTIVE status with challenger shadow-running. Champion/challenger comparison data flowing (win rate, expectancy, drawdown for both sides).
+- **Promotion gates enforced:** No hypothesis promoted to CONFIRMED without meeting ALL thresholds: n>=30, Wilson significance (z=1.645), expectancy guard, drawdown constraint. Verify by inspecting `strategy_hypotheses` table.
+- **AI override measurement:** AI override hit rate tracked as first-class KPI. Data showing whether AI passes on gate-qualified stocks were correct (avoided losses) or incorrect (missed gains).
+- **No auto-promotion:** Every CONFIRMED hypothesis requires a PR. Merge is the gate.
+
+KPI baselines to establish:
+- Decision quality ratio: missed opportunities vs good avoids (target: good avoids > missed opps)
+- Per-signal win rate by regime (establish baselines for gate calibration)
+- AI override value-add: net expectancy impact of AI passes vs gate-only
+- Hypothesis throughput: proposals per week, time from PROPOSED to ACTIVE
 
 ---
 

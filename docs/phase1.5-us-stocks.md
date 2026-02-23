@@ -605,6 +605,23 @@ US stocks work on IBKR paper accounts identically to LSE. No special configurati
 
 ---
 
+## Exit Gate
+
+Phase 1.5 is complete when ALL of the following are met:
+
+- **Friction reduction:** Measured round-trip friction <0.15% for US trades (vs ~0.85% LSE baseline). Verify with at least 3 completed US round-trip trades (paper or live).
+- **Mixed-exchange stability:** Guardian and risk pipeline operating stably with both LSE and US positions for 1+ week. No false stop-loss triggers from exchange/currency confusion.
+- **Data pipeline:** US quotes flowing via IBKR → Yahoo → FMP fallback chain. Discovery pipeline finding US candidates. Reconciliation clean across both exchanges.
+- **Extended hours:** Orchestrator ticks running 08:00–21:00 without errors. Wind-down enforcement correct per exchange (LSE at 16:25, US at 20:55).
+- **No regression:** LSE functionality unchanged — existing positions, quotes, screening, and risk checks all pass regression tests.
+
+KPI baselines to establish during this phase:
+- US vs LSE friction per trade (target: US < 0.15%, confirming the thesis)
+- Quote availability rate by exchange (target: >98% for both)
+- FX conversion accuracy (spot check against market rate, tolerance ±0.1%)
+
+---
+
 ## Testing Checklist
 
 - [ ] `getContract("AAPL", "NASDAQ")` returns correct contract (SMART, NASDAQ, USD)
