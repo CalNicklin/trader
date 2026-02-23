@@ -565,9 +565,14 @@ For prompt hypotheses: modify the trading analyst prompt.
 Always create a PR — never auto-deploy.`
 ```
 
-**Allowed files for self-improvement PRs:**
+**Allowed files for self-improvement PRs (direct modification):**
 - `src/agent/prompts/trading-analyst.ts` (existing)
+- `src/agent/prompts/risk-reviewer.ts` (existing)
+- `src/agent/prompts/self-improvement.ts` (existing)
+- `src/research/watchlist.ts` (existing)
 - `config/momentum-gate.json` (new — gate parameters)
+
+**Any other file** — including `src/risk/limits.ts`, `src/risk/manager.ts`, `src/db/schema.ts`, broker code, scheduler timing, etc. — the agent raises a **GitHub issue** instead of a PR. The issue includes the finding, evidence, proposed change, and target file. Human reviews and implements (or rejects). Max 3 issues/week.
 
 ### Hypothesis Lifecycle Example
 

@@ -405,7 +405,8 @@ This step validates both the indicator pipeline and the gate filtering before th
 - Include these in the self-improvement prompt as "candidates for codification"
 - **NEW: Gate config as target.** For hypotheses with `targetType: "gate_param"`, the self-improvement agent proposes PRs that modify `config/momentum-gate.json`. For `targetType: "prompt"`, it modifies the trading analyst prompt (existing behavior).
 - Add `config/momentum-gate.json` to the self-improvement allowed-files list
-- The self-improvement agent can then propose PRs that embed confirmed hypotheses into gate config or prompt permanently
+- **NEW: Issue creation for out-of-scope changes.** For any proposed change targeting files outside the allowed list (hardcoded limits, risk config, broker code, schema, etc.), the agent creates a GitHub issue instead of silently skipping. Issues include finding, evidence, proposed change, and target file. Max 3 issues/week.
+- The self-improvement agent can then propose PRs that embed confirmed hypotheses into gate config or prompt permanently, and raise issues for changes that require human implementation
 
 ---
 

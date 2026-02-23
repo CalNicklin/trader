@@ -34,7 +34,7 @@ All times are London (Europe/London). Weekdays only unless noted.
 | 19:00 Wed | `mid_week_analysis` | Pattern analysis on recent trade reviews | No |
 | 19:00 Fri | `end_of_week_analysis` | End-of-week pattern analysis | No |
 | 17:30 Fri | `weekly_summary` | Weekly performance summary | Yes |
-| 20:00 Sun | `self_improvement` | Reviews performance, may create improvement PRs | No |
+| 20:00 Sun | `self_improvement` | Reviews performance, creates PRs (whitelisted files) or issues (any file) | No |
 
 ## Emails You Should Receive
 

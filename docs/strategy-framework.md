@@ -203,7 +203,7 @@ const DEFAULT_GATE: MomentumGate = {
 };
 ```
 
-These parameters are stored in configuration (not hard-coded). The strategy journal can propose changes. The self-improvement system can modify them via PR.
+These parameters are stored in configuration (not hard-coded). The strategy journal can propose changes. The self-improvement system can modify them via PR (for whitelisted files) or raise GitHub issues for human review (for any other file, including hardcoded limits and risk config).
 
 ### Research Quality Filter (default)
 
