@@ -66,6 +66,13 @@ export interface YahooFundamentals {
 	returnOnEquity: number | null;
 	debtToEquity: number | null;
 	freeCashFlow: number | null;
+	forwardPE: number | null;
+	pegRatio: number | null;
+	priceToBook: number | null;
+	enterpriseToEbitda: number | null;
+	earningsGrowth: number | null;
+	revenueGrowthEstimate: number | null;
+	nextEarningsDate: string | null;
 	sector: string | null;
 	industry: string | null;
 	description: string | null;
@@ -76,13 +83,27 @@ export async function getYahooFundamentals(symbol: string): Promise<YahooFundame
 	try {
 		const yahooSymbol = symbol.endsWith(".L") ? symbol : `${symbol}.L`;
 		const result = await yf.quoteSummary(yahooSymbol, {
-			modules: ["financialData", "defaultKeyStatistics", "assetProfile"],
+			modules: [
+				"financialData",
+				"defaultKeyStatistics",
+				"assetProfile",
+				"earningsTrend",
+				"calendarEvents",
+			],
 		});
 
 		if (!result) return null;
 
 		const fin = result.financialData;
+		const stats = result.defaultKeyStatistics;
 		const profile = result.assetProfile;
+		const earnings = result.earningsTrend;
+		const calendar = result.calendarEvents;
+
+		const nextEarningsRaw = calendar?.earnings?.earningsDate?.[0];
+		const nextEarningsDate = nextEarningsRaw
+			? new Date(nextEarningsRaw).toISOString().split("T")[0]!
+			: null;
 
 		return {
 			symbol,
@@ -93,6 +114,13 @@ export async function getYahooFundamentals(symbol: string): Promise<YahooFundame
 			returnOnEquity: fin?.returnOnEquity ?? null,
 			debtToEquity: fin?.debtToEquity ?? null,
 			freeCashFlow: fin?.freeCashflow ?? null,
+			forwardPE: stats?.forwardPE ?? null,
+			pegRatio: stats?.pegRatio ?? null,
+			priceToBook: stats?.priceToBook ?? null,
+			enterpriseToEbitda: stats?.enterpriseToEbitda ?? null,
+			earningsGrowth: earnings?.trend?.[0]?.earningsEstimate?.growth ?? null,
+			revenueGrowthEstimate: earnings?.trend?.[0]?.revenueEstimate?.growth ?? null,
+			nextEarningsDate,
 			sector: profile?.sector ?? null,
 			industry: profile?.industry ?? null,
 			description: profile?.longBusinessSummary?.substring(0, 500) ?? null,
