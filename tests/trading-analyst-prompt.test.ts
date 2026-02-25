@@ -15,20 +15,21 @@ describe("trading analyst prompt adapts to paper mode", () => {
 		const prompt = getTradingAnalystSystem();
 
 		expect(prompt).toContain("Trading Mode: PAPER");
-		expect(prompt).toContain("learning from real executions beats waiting for perfection");
+		expect(prompt).toContain("learning from executions beats waiting for perfection");
 		expect(prompt).toContain("only act on >= 0.5");
-		expect(prompt).toContain("at least 1.5:1");
+		expect(prompt).toContain("momentum-qualified candidates");
+		expect(prompt).toContain("override_reason");
 
 		expect(prompt).not.toContain("Trading Mode: LIVE");
-		expect(prompt).not.toContain("no trade is better than a bad trade");
 		expect(prompt).not.toContain("only act on >= 0.7");
-		expect(prompt).not.toContain("at least 2:1");
 	});
 
 	test("mini analysis prompt encourages action in paper mode", () => {
 		const prompt = getMiniAnalysisPrompt();
 
 		expect(prompt).toContain("willing to act");
-		expect(prompt).not.toContain("Be conservative");
+		expect(prompt).toContain("gate-qualified");
+		expect(prompt).toContain("trailing stop");
+		expect(prompt).not.toContain("genuine conviction beyond");
 	});
 });

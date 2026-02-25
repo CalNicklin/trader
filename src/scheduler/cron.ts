@@ -56,6 +56,13 @@ export function startScheduler(): void {
 		}),
 	);
 
+	// Decision scorer at 17:30 weekdays — scores HOLD/WATCH/PASS decisions
+	tasks.push(
+		cron.schedule("30 17 * * 1-5", () => runJobs("decision_scorer"), {
+			timezone: "Europe/London",
+		}),
+	);
+
 	// Mid-week pattern analysis at 19:00 Wednesday
 	tasks.push(
 		cron.schedule("0 19 * * 3", () => runJobs("mid_week_analysis"), {

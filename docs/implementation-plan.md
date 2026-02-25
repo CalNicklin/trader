@@ -183,14 +183,14 @@ These can be done in any order. Group into sub-commits by file if preferred:
 
 ---
 
-## Phase 2: Trading Intelligence
+## Phase 2: Trading Intelligence — COMPLETE
 
 **Goal:** Give the agent a signal-based analytical framework with momentum gate, contextual AI judgment, and trailing stops.
 **Estimated effort:** 2–3 sessions.
 **Deploy, then observe for 1–2 trading weeks. Shadow evaluation: gate-only vs gate+AI. Compare decision quality and trade frequency against Phase 1 baseline.**
 **KPIs:** Gate pass rate, AI approval rate, Sonnet call reduction, signal-level win/loss by regime. See [strategy-framework.md](./strategy-framework.md) for measurement windows.
 
-### Step 2.1 — Technical indicator engine
+### Step 2.1 — Technical indicator engine ✓
 
 **Reference:** [Phase 2 doc, Section 1](./phase2-trading-intelligence.md#1-technical-indicator-engine)
 
@@ -208,7 +208,7 @@ These can be done in any order. Group into sub-commits by file if preferred:
 
 ---
 
-### Step 2.2 — Schema change for 52-week range
+### Step 2.2 — Schema change for 52-week range ✓
 
 **Reference:** [Phase 2 doc, Section 1 — New Watchlist Column](./phase2-trading-intelligence.md#new-watchlist-column)
 
@@ -221,7 +221,7 @@ These can be done in any order. Group into sub-commits by file if preferred:
 
 ---
 
-### Step 2.3 — Integrate indicators into orchestrator + momentum gate
+### Step 2.3 — Integrate indicators into orchestrator + momentum gate ✓
 
 **Reference:** [Phase 2 doc, Section 4](./phase2-trading-intelligence.md#4-integration-points)
 
@@ -243,7 +243,7 @@ This step validates both the indicator pipeline and the gate filtering before th
 
 ---
 
-### Step 2.4 — Integrate indicators into research pipeline
+### Step 2.4 — Integrate indicators into research pipeline ✓
 
 **Reference:** [Phase 2 doc, Section 4](./phase2-trading-intelligence.md#4-integration-points)
 
@@ -257,7 +257,7 @@ This step validates both the indicator pipeline and the gate filtering before th
 
 ---
 
-### Step 2.5 — ATR-based position sizing + trailing stops
+### Step 2.5 — ATR-based position sizing + trailing stops ✓
 
 **Reference:** [Phase 2 doc, Section 3](./phase2-trading-intelligence.md#3-volatility-adjusted-sizing--trailing-stops)
 
@@ -274,7 +274,7 @@ This step validates both the indicator pipeline and the gate filtering before th
 
 ---
 
-### Step 2.6 — Contextual judgment prompt (replaces multi-factor scoring)
+### Step 2.6 — Contextual judgment prompt (replaces multi-factor scoring) ✓
 
 **Reference:** [Phase 2 doc, Section 2](./phase2-trading-intelligence.md#2-contextual-judgment-prompt-replaces-multi-factor-scoring)
 

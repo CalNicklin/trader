@@ -37,6 +37,8 @@ export const positions = sqliteTable("positions", {
 	marketValue: real("market_value"),
 	stopLossPrice: real("stop_loss_price"),
 	targetPrice: real("target_price"),
+	highWaterMark: real("high_water_mark"),
+	trailingStopPrice: real("trailing_stop_price"),
 	updatedAt: text("updated_at")
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
@@ -69,6 +71,8 @@ export const watchlist = sqliteTable("watchlist", {
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
 	active: integer("active", { mode: "boolean" }).notNull().default(true),
+	high52w: real("high_52w"),
+	low52w: real("low_52w"),
 });
 
 export const dailySnapshots = sqliteTable("daily_snapshots", {
@@ -169,6 +173,64 @@ export const tokenUsage = sqliteTable("token_usage", {
 	createdAt: text("created_at")
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
+});
+
+export const decisionScores = sqliteTable("decision_scores", {
+	id: integer("id").primaryKey({ autoIncrement: true }),
+	symbol: text("symbol").notNull(),
+	decisionTime: text("decision_time").notNull(),
+	statedAction: text("stated_action").notNull(),
+	reason: text("reason"),
+	priceAtDecision: real("price_at_decision").notNull(),
+	priceNow: real("price_now").notNull(),
+	changePct: real("change_pct").notNull(),
+	score: text("score", {
+		enum: ["good_hold", "good_pass", "good_avoid", "missed_opportunity", "unclear"],
+	}).notNull(),
+	genuineMiss: integer("genuine_miss", { mode: "boolean" }),
+	lesson: text("lesson"),
+	tags: text("tags"),
+	signalState: text("signal_state"),
+	gateResult: text("gate_result"),
+	aiOverrideReason: text("ai_override_reason"),
+	createdAt: text("created_at")
+		.notNull()
+		.$defaultFn(() => new Date().toISOString()),
+});
+
+export const strategyHypotheses = sqliteTable("strategy_hypotheses", {
+	id: integer("id").primaryKey({ autoIncrement: true }),
+	hypothesis: text("hypothesis").notNull(),
+	evidence: text("evidence").notNull(),
+	actionable: text("actionable").notNull(),
+	targetType: text("target_type", {
+		enum: ["gate_param", "prompt", "risk_config"],
+	})
+		.notNull()
+		.default("prompt"),
+	targetParam: text("target_param"),
+	category: text("category", {
+		enum: ["sector", "timing", "momentum", "value", "risk", "sizing", "general"],
+	}).notNull(),
+	status: text("status", {
+		enum: ["proposed", "active", "confirmed", "rejected"],
+	})
+		.notNull()
+		.default("proposed"),
+	supportingTrades: integer("supporting_trades").notNull().default(0),
+	winRate: real("win_rate"),
+	championWinRate: real("champion_win_rate"),
+	expectancy: real("expectancy"),
+	championExpectancy: real("champion_expectancy"),
+	maxDrawdown: real("max_drawdown"),
+	championMaxDrawdown: real("champion_max_drawdown"),
+	sampleSize: integer("sample_size").notNull().default(0),
+	proposedAt: text("proposed_at")
+		.notNull()
+		.$defaultFn(() => new Date().toISOString()),
+	lastEvaluatedAt: text("last_evaluated_at"),
+	statusChangedAt: text("status_changed_at"),
+	rejectionReason: text("rejection_reason"),
 });
 
 export const improvementProposals = sqliteTable("improvement_proposals", {

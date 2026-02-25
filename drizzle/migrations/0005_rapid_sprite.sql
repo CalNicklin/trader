@@ -1,0 +1,41 @@
+CREATE TABLE `decision_scores` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`symbol` text NOT NULL,
+	`decision_time` text NOT NULL,
+	`stated_action` text NOT NULL,
+	`reason` text,
+	`price_at_decision` real NOT NULL,
+	`price_now` real NOT NULL,
+	`change_pct` real NOT NULL,
+	`score` text NOT NULL,
+	`genuine_miss` integer,
+	`lesson` text,
+	`tags` text,
+	`signal_state` text,
+	`gate_result` text,
+	`ai_override_reason` text,
+	`created_at` text NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `strategy_hypotheses` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`hypothesis` text NOT NULL,
+	`evidence` text NOT NULL,
+	`actionable` text NOT NULL,
+	`target_type` text DEFAULT 'prompt' NOT NULL,
+	`target_param` text,
+	`category` text NOT NULL,
+	`status` text DEFAULT 'proposed' NOT NULL,
+	`supporting_trades` integer DEFAULT 0 NOT NULL,
+	`win_rate` real,
+	`champion_win_rate` real,
+	`expectancy` real,
+	`champion_expectancy` real,
+	`max_drawdown` real,
+	`champion_max_drawdown` real,
+	`sample_size` integer DEFAULT 0 NOT NULL,
+	`proposed_at` text NOT NULL,
+	`last_evaluated_at` text,
+	`status_changed_at` text,
+	`rejection_reason` text
+);

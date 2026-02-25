@@ -15,10 +15,23 @@ test("hard limits are correctly defined", () => {
 	expect(HARD_LIMITS.ISA_NO_MARGIN).toBe(true);
 });
 
-test("stop loss calculation is correct", () => {
+test("stop loss calculation falls back to 3% without ATR", () => {
 	const stopLoss = calculateStopLoss(100);
 	expect(stopLoss).toBe(97); // 100 * (1 - 3/100)
 
 	const stopLoss2 = calculateStopLoss(250.5);
 	expect(stopLoss2).toBeCloseTo(242.985, 2);
+});
+
+test("stop loss uses ATR when provided", () => {
+	// 2000p price, ATR 40p → stop at 2000 - (40 * 2) = 1920
+	const stopLoss = calculateStopLoss(2000, 40);
+	expect(stopLoss).toBe(1920);
+});
+
+test("ATR-related limits are defined", () => {
+	expect(HARD_LIMITS.STOP_LOSS_ATR_MULTIPLIER).toBe(2);
+	expect(HARD_LIMITS.TARGET_ATR_MULTIPLIER).toBe(3);
+	expect(HARD_LIMITS.RISK_PER_TRADE_PCT).toBe(1);
+	expect(HARD_LIMITS.TRAILING_STOP_ATR_MULTIPLIER).toBe(2);
 });

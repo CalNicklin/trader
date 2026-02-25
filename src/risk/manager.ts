@@ -242,8 +242,11 @@ async function checkWeeklyLossLimit(
 	return { breached: false, message: "" };
 }
 
-/** Calculate the stop loss price for a given entry price */
-export function calculateStopLoss(entryPrice: number): number {
+/** Calculate the stop loss price for a given entry price. Uses ATR when available, falls back to fixed 3%. */
+export function calculateStopLoss(entryPrice: number, atr?: number): number {
+	if (atr) {
+		return entryPrice - atr * HARD_LIMITS.STOP_LOSS_ATR_MULTIPLIER;
+	}
 	return entryPrice * (1 - HARD_LIMITS.PER_TRADE_STOP_LOSS_PCT / 100);
 }
 
@@ -265,4 +268,47 @@ export async function getMaxPositionSize(
 	const maxQuantity = Math.floor(maxValue / price);
 
 	return { maxQuantity, maxValue };
+}
+
+export interface AtrPositionSize {
+	maxQuantity: number;
+	maxValue: number;
+	stopLossPrice: number;
+	targetPrice: number;
+	riskPerShare: number;
+	riskTotal: number;
+}
+
+/**
+ * ATR-based position sizing. Risk per trade = RISK_PER_TRADE_PCT of portfolio.
+ * Stop distance = STOP_LOSS_ATR_MULTIPLIER x ATR.
+ * Cross-checks against existing hard limits.
+ */
+export async function getAtrPositionSize(price: number, atr: number): Promise<AtrPositionSize> {
+	const account = await getAccountSummary();
+
+	const riskPerShare = atr * HARD_LIMITS.STOP_LOSS_ATR_MULTIPLIER;
+	const riskBudget = (account.netLiquidation * HARD_LIMITS.RISK_PER_TRADE_PCT) / 100;
+	const atrBasedQuantity = Math.floor(riskBudget / riskPerShare);
+	const atrBasedValue = atrBasedQuantity * price;
+
+	const pctLimit = (account.netLiquidation * HARD_LIMITS.MAX_POSITION_PCT) / 100;
+	const gbpLimit = HARD_LIMITS.MAX_POSITION_GBP;
+	const availableCash =
+		account.totalCashValue - (account.netLiquidation * HARD_LIMITS.MIN_CASH_RESERVE_PCT) / 100;
+
+	const maxValue = Math.min(atrBasedValue, pctLimit, gbpLimit, Math.max(0, availableCash));
+	const maxQuantity = Math.floor(maxValue / price);
+
+	const stopLossPrice = price - riskPerShare;
+	const targetPrice = price + atr * HARD_LIMITS.TARGET_ATR_MULTIPLIER;
+
+	return {
+		maxQuantity,
+		maxValue,
+		stopLossPrice,
+		targetPrice,
+		riskPerShare,
+		riskTotal: maxQuantity * riskPerShare,
+	};
 }

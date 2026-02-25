@@ -1,0 +1,6 @@
+{
+	"trendAlignment": ["strong_up", "up"],
+	"rsiRange": [45, 75],
+	"minVolumeRatio": 0.8,
+	"excludeOverbought": true
+}

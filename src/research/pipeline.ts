@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
+import { computeIndicators } from "../analysis/indicators.ts";
 import { getHistoricalBars } from "../broker/market-data.ts";
 import { getConfig } from "../config.ts";
 import { getDb } from "../db/client.ts";
@@ -230,21 +231,37 @@ export async function researchSymbol(
 		getYahooFundamentals(symbol),
 	]);
 
-	// Get historical bars from IBKR if connected
+	// Fetch 1Y bars for full indicators + 52w range (pipeline has time budget for this)
 	let historicalBars = null;
 	try {
-		historicalBars = await getHistoricalBars(symbol, "1 M");
+		historicalBars = await getHistoricalBars(symbol, "1 Y");
 	} catch {
 		log.debug({ symbol }, "Historical bars not available (IBKR might be disconnected)");
 	}
 
-	// Claude analysis
+	// Compute indicators from bars
+	let indicators = null;
+	if (historicalBars && historicalBars.length > 0) {
+		indicators = computeIndicators(symbol, historicalBars);
+
+		// Update 52w high/low on watchlist
+		const high52w = Math.max(...historicalBars.map((b) => b.high));
+		const low52w = Math.min(...historicalBars.map((b) => b.low));
+		const db = getDb();
+		await db.update(watchlist).set({ high52w, low52w }).where(eq(watchlist.symbol, symbol));
+	}
+
+	// Claude analysis (with indicators when available)
 	const analysis = await analyzeStock(symbol, {
 		quote,
 		fundamentals,
 		news: newsItems,
 		historicalBars,
+		indicators,
 	});
+
+	const dataQuality =
+		quote && fundamentals ? "full" : quote || fundamentals ? "partial" : "minimal";
 
 	// Store research results
 	const db = getDb();
@@ -255,6 +272,7 @@ export async function researchSymbol(
 			quote,
 			fundamentals,
 			newsCount: newsItems.length,
+			dataQuality,
 		}),
 		sentiment: analysis.sentiment,
 		bullCase: analysis.bullCase,

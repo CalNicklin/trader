@@ -18,17 +18,63 @@ Given:
 - Confidence calibration data (win rates by confidence bucket)
 - Sector performance breakdown
 - Tag frequency analysis (which patterns appear in wins vs losses)
+- Decision quality scores (HOLD/WATCH/PASS outcomes)
+- Signal effectiveness data (per-signal win/loss stats)
+- AI override hit rate (gate-qualified stocks where AI passed)
 
 Identify up to 5 specific, actionable insights. Each insight must be:
 - Grounded in the data (not generic trading advice)
 - Actionable (the trading agent can change behavior based on it)
 - Categorized by type
 
-Respond with a JSON array of objects, each with:
+Respond with a JSON object containing two arrays:
+
+1. "insights": array of objects, each with:
 - category: "confidence_calibration" | "sector_performance" | "timing" | "risk_management" | "general"
 - insight: plain text observation (max 200 chars)
 - actionable: specific guidance for the trading agent (max 200 chars)
 - severity: "info" | "warning" | "critical"
 - data: object with supporting numbers (e.g. { winRate: 0.6, sampleSize: 12 })
 
-Only return insights supported by sufficient data (at least 3 trades). If there isn't enough data for meaningful patterns, return fewer insights or an empty array.`;
+Only return insights supported by sufficient data (at least 3 trades). If there isn't enough data for meaningful patterns, return fewer insights or an empty array.
+
+2. "hypotheses": array of strategy hypothesis updates (champion/challenger model). Hypotheses can target gate parameters, prompt text, or risk config.
+
+Based on the signal-tagged decision data:
+
+a) Propose new hypotheses if you see a pattern with ≥5 supporting trades that isn't already tracked.
+   - For gate parameters: "Lower minVolumeRatio from 0.8 to 0.6" (targetType: "gate_param", targetParam: "minVolumeRatio")
+   - For prompt changes: "Add sector rotation awareness" (targetType: "prompt")
+b) Evaluate existing hypotheses using champion/challenger comparison:
+   - PROPOSED → ACTIVE: if supporting evidence reaches ≥10 trades with consistent pattern. Start shadow-running.
+   - ACTIVE → CONFIRMED: ONLY when ALL promotion thresholds are met:
+     * n >= 30 trades under challenger
+     * Wilson score lower bound (z=1.645) of challenger win rate > champion point estimate
+     * Challenger expectancy >= champion expectancy
+     * Challenger max drawdown <= champion max drawdown × 1.2
+   - ANY → REJECTED: if counter-evidence disproves it, or challenger fails promotion thresholds after n>=30
+   - NEVER auto-promote. CONFIRMED status means "ready for PR" not "deployed."
+
+Each hypothesis object:
+{
+  "action": "propose" | "update" | "reject",
+  "id": null (for propose) | number (for update/reject),
+  "hypothesis": "description",
+  "evidence": "supporting data from this analysis",
+  "actionable": "what should change",
+  "targetType": "gate_param" | "prompt" | "risk_config",
+  "targetParam": "minVolumeRatio" | null,
+  "category": "sector" | "timing" | "momentum" | "value" | "risk" | "sizing" | "general",
+  "status": "proposed" | "active" | "confirmed" | "rejected",
+  "supportingTrades": 12,
+  "winRate": 0.67,
+  "championWinRate": 0.55,
+  "expectancy": 1.2,
+  "championExpectancy": 0.9,
+  "maxDrawdown": 0.05,
+  "championMaxDrawdown": 0.04,
+  "sampleSize": 32,
+  "rejectionReason": null | "reason"
+}
+
+Return empty arrays if insufficient data. Do NOT propose hypotheses with fewer than 5 supporting data points. Do NOT promote to CONFIRMED unless all thresholds are provably met.`;

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../db/client.ts";
 import { agentLogs, positions, trades, watchlist } from "../db/schema.ts";
+import { HARD_LIMITS } from "../risk/limits.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { getQuotes, type Quote } from "./market-data.ts";
@@ -9,6 +10,7 @@ import { computeReconciliation } from "./order-reconcile.ts";
 import type { ExecutionLike, OpenOrderLike, SubmittedTrade } from "./order-types.ts";
 import { getOpenOrders, placeTrade } from "./orders.ts";
 import { findStopLossBreaches } from "./stop-loss.ts";
+import { computeTrailingStopUpdate } from "./trailing-stops.ts";
 
 const log = createChildLogger({ module: "guardian" });
 
@@ -84,7 +86,10 @@ async function guardianTick(): Promise<void> {
 		// 2. Update position prices
 		await updatePositionPrices(positionRows, quotes);
 
-		// 3. Price alert accumulator
+		// 3. Trailing stop updates
+		await updateTrailingStops(positionRows, quotes);
+
+		// 4. Price alert accumulator
 		accumulateAlerts(quotes);
 	} catch (error) {
 		log.error({ error }, "Guardian tick failed");
@@ -180,6 +185,90 @@ function accumulateAlerts(quotes: Map<string, Quote>): void {
 			}
 		}
 		lastPrices.set(symbol, price);
+	}
+}
+
+/** Update trailing stops for positions with ATR data */
+async function updateTrailingStops(
+	positionRows: Array<{
+		id: number;
+		symbol: string;
+		quantity: number;
+		highWaterMark: number | null;
+		trailingStopPrice: number | null;
+	}>,
+	quotes: Map<string, Quote>,
+): Promise<void> {
+	const db = getDb();
+
+	for (const pos of positionRows) {
+		const quote = quotes.get(pos.symbol);
+		const currentPrice = quote?.last ?? quote?.bid ?? null;
+		if (!currentPrice) continue;
+
+		// Look up ATR from the indicators cache (compute if needed)
+		let atr14: number | null = null;
+		try {
+			const { getIndicatorsForSymbol } = await import("../analysis/indicators.ts");
+			const indicators = await getIndicatorsForSymbol(pos.symbol, "3 M");
+			atr14 = indicators?.atr14 ?? null;
+		} catch {
+			// Indicators not available — skip trailing stop update
+		}
+
+		const update = computeTrailingStopUpdate(
+			{
+				id: pos.id,
+				symbol: pos.symbol,
+				quantity: pos.quantity,
+				highWaterMark: pos.highWaterMark,
+				trailingStopPrice: pos.trailingStopPrice,
+				atr14,
+				currentPrice,
+			},
+			HARD_LIMITS.TRAILING_STOP_ATR_MULTIPLIER,
+		);
+
+		if (!update) continue;
+
+		await db
+			.update(positions)
+			.set({
+				highWaterMark: update.highWaterMark,
+				trailingStopPrice: update.trailingStopPrice,
+				updatedAt: new Date().toISOString(),
+			})
+			.where(eq(positions.id, pos.id));
+
+		if (update.triggered) {
+			log.warn(
+				{
+					symbol: pos.symbol,
+					price: currentPrice,
+					trailingStop: update.trailingStopPrice,
+				},
+				"Trailing stop triggered — placing MARKET SELL",
+			);
+
+			try {
+				await placeTrade({
+					symbol: pos.symbol,
+					side: "SELL",
+					quantity: pos.quantity,
+					orderType: "MARKET",
+					reasoning: `Trailing stop triggered: price ${currentPrice} <= stop ${update.trailingStopPrice.toFixed(2)}`,
+					confidence: 1.0,
+				});
+
+				await db.insert(agentLogs).values({
+					level: "ACTION",
+					phase: "guardian",
+					message: `Trailing stop executed for ${pos.symbol}: price ${currentPrice} <= trailing stop ${update.trailingStopPrice.toFixed(2)}, sold ${pos.quantity} shares`,
+				});
+			} catch (error) {
+				log.error({ symbol: pos.symbol, error }, "Trailing stop SELL failed");
+			}
+		}
 	}
 }
 

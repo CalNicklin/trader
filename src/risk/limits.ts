@@ -14,8 +14,16 @@ export const HARD_LIMITS = {
 	/** Minimum cash reserve as % of portfolio */
 	MIN_CASH_RESERVE_PCT: 20,
 
-	/** Per-trade stop loss % */
+	/** Per-trade stop loss % (fallback when ATR unavailable) */
 	PER_TRADE_STOP_LOSS_PCT: 3,
+	/** Stop at N × ATR below entry */
+	STOP_LOSS_ATR_MULTIPLIER: 2,
+	/** Minimum target at N × ATR above entry */
+	TARGET_ATR_MULTIPLIER: 3,
+	/** Risk N% of portfolio per trade */
+	RISK_PER_TRADE_PCT: 1,
+	/** Trail stop at N × ATR below highest close */
+	TRAILING_STOP_ATR_MULTIPLIER: 2,
 	/** Daily loss limit as % of portfolio - stops trading for the day */
 	DAILY_LOSS_LIMIT_PCT: 2,
 	/** Weekly loss limit as % of portfolio - circuit breaker */

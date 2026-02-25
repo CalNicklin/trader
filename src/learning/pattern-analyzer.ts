@@ -1,10 +1,18 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { desc, gte } from "drizzle-orm";
+import { desc, eq, gte, not } from "drizzle-orm";
 import { getConfig } from "../config.ts";
 import { getDb } from "../db/client.ts";
-import { dailySnapshots, tradeReviews, watchlist, weeklyInsights } from "../db/schema.ts";
+import {
+	dailySnapshots,
+	decisionScores,
+	strategyHypotheses,
+	tradeReviews,
+	watchlist,
+	weeklyInsights,
+} from "../db/schema.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
+import { checkPromotionThresholds } from "./hypothesis-gates.ts";
 import { PATTERN_ANALYZER_SYSTEM } from "./prompts.ts";
 
 const log = createChildLogger({ module: "pattern-analyzer" });
@@ -115,6 +123,95 @@ export async function runPatternAnalysis(runType: "mid_week" | "end_of_week"): P
 		losses: tagLosses[tag] ?? 0,
 	}));
 
+	// Decision scores from the last 7 days (Phase 3)
+	const decisionScoreRows = await db
+		.select()
+		.from(decisionScores)
+		.where(gte(decisionScores.createdAt, sevenDaysAgo));
+
+	const missedOpps = decisionScoreRows.filter((d) => d.score === "missed_opportunity");
+	const goodAvoids = decisionScoreRows.filter((d) => d.score === "good_avoid");
+	const goodHolds = decisionScoreRows.filter((d) => d.score === "good_hold");
+	const goodPasses = decisionScoreRows.filter((d) => d.score === "good_pass");
+
+	// Per-signal effectiveness: group by signal regime
+	const signalEffectiveness: Record<string, { wins: number; losses: number; total: number }> = {};
+	for (const d of decisionScoreRows) {
+		if (!d.signalState) continue;
+		try {
+			const signals = JSON.parse(d.signalState) as Record<string, unknown>;
+			const trend = signals.trendAlignment as string | undefined;
+			const rsiRegime = signals.rsiRegime as string | undefined;
+			if (trend) {
+				const key = `trend_alignment=${trend}`;
+				if (!signalEffectiveness[key]) signalEffectiveness[key] = { wins: 0, losses: 0, total: 0 };
+				signalEffectiveness[key].total++;
+				if (d.score === "good_hold" || d.score === "good_avoid" || d.score === "good_pass") {
+					signalEffectiveness[key].wins++;
+				} else if (d.score === "missed_opportunity") {
+					signalEffectiveness[key].losses++;
+				}
+			}
+			if (rsiRegime) {
+				const key = `rsi_regime=${rsiRegime}`;
+				if (!signalEffectiveness[key]) signalEffectiveness[key] = { wins: 0, losses: 0, total: 0 };
+				signalEffectiveness[key].total++;
+				if (d.score === "good_hold" || d.score === "good_avoid" || d.score === "good_pass") {
+					signalEffectiveness[key].wins++;
+				} else if (d.score === "missed_opportunity") {
+					signalEffectiveness[key].losses++;
+				}
+			}
+		} catch {
+			// ignore parse errors
+		}
+	}
+
+	// AI override hit rate: gate-qualified stocks where AI passed
+	const aiOverrides = decisionScoreRows.filter(
+		(d) => d.gateResult === "passed" && (d.statedAction === "WATCH" || d.statedAction === "PASS"),
+	);
+	const aiOverrideCorrect = aiOverrides.filter(
+		(d) => d.score === "good_avoid" || d.score === "good_pass",
+	);
+	const aiOverrideIncorrect = aiOverrides.filter((d) => d.score === "missed_opportunity");
+
+	let decisionQualitySection = "";
+	if (decisionScoreRows.length > 0) {
+		const cautionRatio =
+			decisionScoreRows.length > 0
+				? ((missedOpps.length / decisionScoreRows.length) * 100).toFixed(0)
+				: "0";
+		const goodAvoidRatio =
+			decisionScoreRows.length > 0
+				? ((goodAvoids.length / decisionScoreRows.length) * 100).toFixed(0)
+				: "0";
+
+		decisionQualitySection = `
+
+## Decision Quality + Signal Effectiveness (${decisionScoreRows.length} scored decisions)
+- Missed opportunities: ${missedOpps.length} (stocks passed on that rallied >5%)
+${missedOpps.map((d) => `  - ${d.symbol}: passed at ${d.priceAtDecision.toFixed(1)}p, now ${d.priceNow.toFixed(1)}p (+${d.changePct.toFixed(1)}%) — ${d.lesson ?? d.reason ?? "no lesson"}`).join("\n")}
+- Good avoids: ${goodAvoids.length} (stocks passed on that dropped >3%)
+- Good holds: ${goodHolds.length}
+- Good passes: ${goodPasses.length}
+- Caution ratio: ${cautionRatio}% missed vs ${goodAvoidRatio}% good avoid
+
+### Per-Signal Effectiveness
+${Object.entries(signalEffectiveness)
+	.map(
+		([key, data]) =>
+			`- ${key}: ${data.total > 0 ? ((data.wins / data.total) * 100).toFixed(0) : 0}% good decisions (n=${data.total})`,
+	)
+	.join("\n")}
+
+### AI Override Hit Rate (gate-qualified stocks where AI passed)
+- Total AI overrides: ${aiOverrides.length}
+- Correct passes (good avoid/pass): ${aiOverrideCorrect.length}
+- Incorrect passes (missed opportunity): ${aiOverrideIncorrect.length}
+${aiOverrideIncorrect.map((d) => `  - ${d.symbol}: AI passed because "${d.aiOverrideReason ?? "unknown"}", stock moved +${d.changePct.toFixed(1)}%`).join("\n")}`;
+	}
+
 	const prompt = `Analyze these accumulated trading data for a UK ISA portfolio:
 
 ## Trade Reviews (${reviews.length} trades)
@@ -149,15 +246,17 @@ ${JSON.stringify(
 	null,
 	2,
 )}
+${decisionQualitySection}
+${await buildHypothesesContext(db)}
 
-Return a JSON array of up to 5 insights.`;
+Return a JSON object with "insights" and "hypotheses" arrays.`;
 
 	try {
 		const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
 		const response = await client.messages.create({
 			model: config.CLAUDE_MODEL_STANDARD,
-			max_tokens: 2048,
+			max_tokens: 3072,
 			system: [
 				{ type: "text", text: PATTERN_ANALYZER_SYSTEM, cache_control: { type: "ephemeral" } },
 			],
@@ -177,13 +276,38 @@ Return a JSON array of up to 5 insights.`;
 			.map((b) => b.text)
 			.join("");
 
-		const jsonMatch = text.match(/\[[\s\S]*\]/);
-		if (!jsonMatch) {
-			log.warn("No JSON array in pattern analysis response");
+		// Parse response — try object format first (new), fall back to array (legacy)
+		let insights: InsightResult[] = [];
+		let hypothesisUpdates: HypothesisUpdate[] = [];
+
+		const objectMatch = text.match(/\{[\s\S]*\}/);
+		if (objectMatch) {
+			try {
+				const parsed = JSON.parse(objectMatch[0]) as {
+					insights?: InsightResult[];
+					hypotheses?: HypothesisUpdate[];
+				};
+				insights = parsed.insights ?? [];
+				hypothesisUpdates = parsed.hypotheses ?? [];
+			} catch {
+				// Fall back to array format
+				const arrayMatch = text.match(/\[[\s\S]*\]/);
+				if (arrayMatch) {
+					insights = JSON.parse(arrayMatch[0]) as InsightResult[];
+				}
+			}
+		} else {
+			const arrayMatch = text.match(/\[[\s\S]*\]/);
+			if (arrayMatch) {
+				insights = JSON.parse(arrayMatch[0]) as InsightResult[];
+			}
+		}
+
+		if (insights.length === 0 && hypothesisUpdates.length === 0) {
+			log.warn("No insights or hypotheses in pattern analysis response");
 			return;
 		}
 
-		const insights = JSON.parse(jsonMatch[0]) as InsightResult[];
 		const weekStart = getWeekStart();
 
 		for (const insight of insights.slice(0, 5)) {
@@ -198,8 +322,140 @@ Return a JSON array of up to 5 insights.`;
 			});
 		}
 
-		log.info({ runType, insightCount: insights.length }, "Pattern analysis complete");
+		// Process hypothesis updates
+		await processHypothesisUpdates(db, hypothesisUpdates);
+
+		log.info(
+			{ runType, insightCount: insights.length, hypothesisUpdates: hypothesisUpdates.length },
+			"Pattern analysis complete",
+		);
 	} catch (error) {
 		log.error({ error }, "Pattern analysis failed");
+	}
+}
+
+interface HypothesisUpdate {
+	action: "propose" | "update" | "reject";
+	id: number | null;
+	hypothesis: string;
+	evidence: string;
+	actionable: string;
+	targetType?: "gate_param" | "prompt" | "risk_config";
+	targetParam?: string | null;
+	category: string;
+	status: string;
+	supportingTrades?: number;
+	winRate?: number | null;
+	championWinRate?: number | null;
+	expectancy?: number | null;
+	championExpectancy?: number | null;
+	maxDrawdown?: number | null;
+	championMaxDrawdown?: number | null;
+	sampleSize?: number;
+	rejectionReason?: string | null;
+}
+
+type DbClient = ReturnType<typeof getDb>;
+
+async function buildHypothesesContext(db: DbClient): Promise<string> {
+	const existing = await db
+		.select()
+		.from(strategyHypotheses)
+		.where(not(eq(strategyHypotheses.status, "rejected")));
+
+	if (existing.length === 0) return "";
+
+	const formatted = existing.map((h) => {
+		const target =
+			h.targetType === "gate_param"
+				? `[GATE: ${h.targetParam}]`
+				: `[${(h.targetType ?? "prompt").toUpperCase()}]`;
+		return `- ID ${h.id}: ${target} "${h.hypothesis}" (status: ${h.status}, n=${h.sampleSize}, WR=${((h.winRate ?? 0) * 100).toFixed(0)}%, exp=${h.expectancy?.toFixed(2) ?? "?"})`;
+	});
+
+	return `\n## Existing Strategy Hypotheses (evaluate these)\n${formatted.join("\n")}`;
+}
+
+async function processHypothesisUpdates(db: DbClient, updates: HypothesisUpdate[]): Promise<void> {
+	for (const update of updates) {
+		try {
+			if (update.action === "propose") {
+				await db.insert(strategyHypotheses).values({
+					hypothesis: update.hypothesis,
+					evidence: update.evidence,
+					actionable: update.actionable,
+					targetType: (update.targetType ?? "prompt") as "gate_param" | "prompt" | "risk_config",
+					targetParam: update.targetParam ?? null,
+					category: update.category as
+						| "sector"
+						| "timing"
+						| "momentum"
+						| "value"
+						| "risk"
+						| "sizing"
+						| "general",
+					status: "proposed",
+					supportingTrades: update.supportingTrades ?? 0,
+					winRate: update.winRate ?? null,
+					sampleSize: update.sampleSize ?? 0,
+				});
+				log.info({ hypothesis: update.hypothesis }, "New hypothesis proposed");
+			} else if (update.action === "update" && update.id) {
+				let newStatus = update.status;
+
+				// Enforce promotion gate: if trying to set CONFIRMED, verify thresholds
+				if (newStatus === "confirmed") {
+					const result = checkPromotionThresholds({
+						sampleSize: update.sampleSize ?? 0,
+						challengerWinRate: update.winRate ?? 0,
+						championWinRate: update.championWinRate ?? 0,
+						challengerExpectancy: update.expectancy ?? 0,
+						championExpectancy: update.championExpectancy ?? 0,
+						challengerMaxDrawdown: update.maxDrawdown ?? 0,
+						championMaxDrawdown: update.championMaxDrawdown ?? 0,
+					});
+
+					if (!result.canPromote) {
+						log.warn(
+							{ id: update.id, reasons: result.reasons },
+							"Promotion blocked — thresholds not met, keeping current status",
+						);
+						newStatus = "active";
+					}
+				}
+
+				await db
+					.update(strategyHypotheses)
+					.set({
+						evidence: update.evidence,
+						status: newStatus as "proposed" | "active" | "confirmed" | "rejected",
+						supportingTrades: update.supportingTrades ?? undefined,
+						winRate: update.winRate ?? undefined,
+						championWinRate: update.championWinRate ?? undefined,
+						expectancy: update.expectancy ?? undefined,
+						championExpectancy: update.championExpectancy ?? undefined,
+						maxDrawdown: update.maxDrawdown ?? undefined,
+						championMaxDrawdown: update.championMaxDrawdown ?? undefined,
+						sampleSize: update.sampleSize ?? undefined,
+						lastEvaluatedAt: new Date().toISOString(),
+						statusChangedAt: newStatus !== "proposed" ? new Date().toISOString() : undefined,
+					})
+					.where(eq(strategyHypotheses.id, update.id));
+				log.info({ id: update.id, status: newStatus }, "Hypothesis updated");
+			} else if (update.action === "reject" && update.id) {
+				await db
+					.update(strategyHypotheses)
+					.set({
+						status: "rejected",
+						rejectionReason: update.rejectionReason ?? null,
+						lastEvaluatedAt: new Date().toISOString(),
+						statusChangedAt: new Date().toISOString(),
+					})
+					.where(eq(strategyHypotheses.id, update.id));
+				log.info({ id: update.id }, "Hypothesis rejected");
+			}
+		} catch (error) {
+			log.error({ update, error }, "Failed to process hypothesis update");
+		}
 	}
 }

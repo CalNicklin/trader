@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { desc, gte } from "drizzle-orm";
+import { and, desc, eq, gte } from "drizzle-orm";
 import { setPaused } from "../agent/orchestrator.ts";
 import {
 	SELF_IMPROVEMENT_SYSTEM,
@@ -10,6 +10,7 @@ import { getDb } from "../db/client.ts";
 import {
 	dailySnapshots,
 	improvementProposals,
+	strategyHypotheses,
 	tradeReviews,
 	trades,
 	weeklyInsights,
@@ -34,6 +35,7 @@ const ALLOWED_FILES = [
 	"src/agent/prompts/risk-reviewer.ts",
 	"src/agent/prompts/self-improvement.ts",
 	"src/research/watchlist.ts",
+	"config/momentum-gate.json",
 ];
 
 export async function runSelfImprovement(): Promise<void> {
@@ -87,6 +89,32 @@ export async function runSelfImprovement(): Promise<void> {
 			.where(gte(tradeReviews.createdAt, twoWeeksAgo))
 			.orderBy(desc(tradeReviews.createdAt));
 
+		// Query confirmed hypotheses ready for codification (n>=30)
+		const confirmedHypotheses = await db
+			.select()
+			.from(strategyHypotheses)
+			.where(
+				and(eq(strategyHypotheses.status, "confirmed"), gte(strategyHypotheses.sampleSize, 30)),
+			);
+
+		const hypothesesSection =
+			confirmedHypotheses.length > 0
+				? `\n## Confirmed Strategy Hypotheses (candidates for codification)
+${confirmedHypotheses
+	.map((h) => {
+		const target =
+			h.targetType === "gate_param"
+				? `[GATE: ${h.targetParam}]`
+				: `[${(h.targetType ?? "prompt").toUpperCase()}]`;
+		return `- ${target} ${h.hypothesis} (n=${h.sampleSize}, WR=${((h.winRate ?? 0) * 100).toFixed(0)}%, exp=${h.expectancy?.toFixed(2) ?? "?"}): ${h.actionable}`;
+	})
+	.join("\n")}
+
+For gate_param hypotheses: modify the gate config file (config/momentum-gate.json).
+For prompt hypotheses: modify the trading analyst prompt.
+Always create a PR — never auto-deploy.`
+				: "";
+
 		const performanceData = `
 ## Weekly Metrics
 ${JSON.stringify(metrics, null, 2)}
@@ -102,6 +130,7 @@ ${JSON.stringify(recentInsights, null, 2)}
 
 ## Trade Reviews
 ${JSON.stringify(recentReviews, null, 2)}
+${hypothesesSection}
 
 ## Files You Can Modify Directly (PRs)
 ${ALLOWED_FILES.join("\n")}

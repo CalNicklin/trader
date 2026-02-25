@@ -1,4 +1,6 @@
 import { desc, eq, gte } from "drizzle-orm";
+import { formatIndicatorSummary, getIndicatorsForSymbol } from "../analysis/indicators.ts";
+import { evaluateGate, loadGateConfig } from "../analysis/momentum-gate.ts";
 import { getAccountSummary, getPositions as getBrokerPositions } from "../broker/account.ts";
 import type { Quote } from "../broker/market-data.ts";
 import { getQuotes } from "../broker/market-data.ts";
@@ -135,11 +137,26 @@ async function onPreMarket(): Promise<void> {
 
 		const learningBrief = await buildLearningBrief();
 
+		// Compute indicators for positions + top 10 watchlist (no gate filtering for day plan)
+		const indicatorSymbols = [
+			...positionRows.map((p) => p.symbol),
+			...watchlistItems.slice(0, 10).map((w) => w.symbol),
+		];
+		const uniqueSymbols = [...new Set(indicatorSymbols)];
+		const indicatorSummaries: string[] = [];
+		for (const symbol of uniqueSymbols) {
+			const indicators = await getIndicatorsForSymbol(symbol, "3 M");
+			if (indicators) {
+				indicatorSummaries.push(formatIndicatorSummary(indicators));
+			}
+		}
+
 		const context = `
 Account: ${accountData}
 Positions: ${JSON.stringify(positionRows)}
 Watchlist (top 20): ${JSON.stringify(watchlistItems)}
 Date: ${new Date().toISOString()}
+${indicatorSummaries.length > 0 ? `\n## Technical Indicators\n${indicatorSummaries.join("\n")}` : ""}
 ${learningBrief ? `\n${learningBrief}` : ""}
 `;
 
@@ -307,6 +324,41 @@ async function onActiveTradingTick(): Promise<void> {
 			.from(trades)
 			.where(eq(trades.status, "SUBMITTED"));
 
+		// === Tier 2: Momentum gate evaluation ===
+		const gateConfig = loadGateConfig();
+		const gatePassedSummaries: string[] = [];
+		let gatePassCount = 0;
+		let gateFailCount = 0;
+
+		for (const item of watchlistItems) {
+			const indicators = await getIndicatorsForSymbol(item.symbol, "3 M");
+			if (!indicators) continue;
+
+			const gateResult = evaluateGate(indicators, gateConfig);
+
+			await db.insert(agentLogs).values({
+				level: "INFO",
+				phase: "trading",
+				message: `Gate ${gateResult.passed ? "PASS" : "FAIL"}: ${item.symbol} — ${gateResult.reasons.join(", ")}`,
+				data: JSON.stringify({
+					type: "gate_evaluation",
+					symbol: item.symbol,
+					passed: gateResult.passed,
+					reasons: gateResult.reasons,
+					signalState: gateResult.signalState,
+				}),
+			});
+
+			if (gateResult.passed) {
+				gatePassCount++;
+				gatePassedSummaries.push(formatIndicatorSummary(indicators));
+			} else {
+				gateFailCount++;
+			}
+		}
+
+		log.info({ passed: gatePassCount, failed: gateFailCount }, "Momentum gate evaluation complete");
+
 		const lastDecisionContext = lastAgentResponse
 			? `\nLast Sonnet decision (this session): ${lastAgentResponse.substring(0, 600)}`
 			: "";
@@ -333,9 +385,10 @@ Research signals: ${recentResearch.length === 0 ? "None" : JSON.stringify(recent
 Watchlist top scores: ${watchlistItems
 			.slice(0, 5)
 			.map((w) => `${w.symbol}(${w.score})`)
-			.join(", ")}${lastDecisionContext}`;
+			.join(", ")}
+Gate-qualified candidates (${gatePassCount}): ${gatePassedSummaries.length > 0 ? gatePassedSummaries.join("; ") : "None"}${lastDecisionContext}`;
 
-		// === Tier 2: Haiku quick scan ===
+		// Haiku quick scan (still determines escalation based on full picture)
 		const scan = await runQuickScan(scanContext);
 
 		if (!scan.escalate) {
@@ -377,12 +430,27 @@ Watchlist top scores: ${watchlistItems
 			quoteFailures,
 		});
 
+		// Compute indicators for positions (for Tier 3 context)
+		const positionIndicatorSummaries: string[] = [];
+		for (const pos of positionRows) {
+			const indicators = await getIndicatorsForSymbol(pos.symbol, "3 M");
+			if (indicators) {
+				positionIndicatorSummaries.push(formatIndicatorSummary(indicators));
+			}
+		}
+
+		const indicatorSection =
+			gatePassedSummaries.length > 0 || positionIndicatorSummaries.length > 0
+				? `\n## Technical Indicators\n${[...positionIndicatorSummaries, ...gatePassedSummaries].join("\n")}`
+				: "";
+
 		let fullContext: string;
 
 		if (positionRows.length === 0) {
 			fullContext = `
 Watchlist quotes: ${JSON.stringify(Object.fromEntries(preFilter.quotes))}
 Watchlist data: ${JSON.stringify(watchlistItems)}
+${indicatorSection}
 ${recentContext ? `\n${recentContext}` : ""}
 ${enrichments ? `\n${enrichments}` : ""}
 Escalation reason: ${scan.reason}
@@ -399,6 +467,7 @@ Positions with current quotes: ${JSON.stringify(
 					ask: preFilter.quotes.get(p.symbol)?.ask,
 				})),
 			)}
+${indicatorSection}
 ${recentContext ? `\n${recentContext}` : ""}
 ${enrichments ? `\n${enrichments}` : ""}
 Escalation reason: ${scan.reason}
@@ -407,6 +476,33 @@ Escalation reason: ${scan.reason}
 
 		const response = await runTradingAnalyst(`${getMiniAnalysisPrompt()}\n\n${fullContext}`);
 		lastAgentResponse = response.text;
+
+		// Log decision with quote data for the decision scorer (Phase 3)
+		const quoteSnapshot: Record<string, number> = {};
+		for (const [symbol, quote] of preFilter.quotes) {
+			if (quote.last) quoteSnapshot[symbol] = quote.last;
+		}
+		// Also include position quotes
+		for (const pos of positionRows) {
+			if (pos.currentPrice) quoteSnapshot[pos.symbol] = pos.currentPrice;
+		}
+
+		// Collect gate evaluation signal states from this tick
+		const gateStates: Record<string, { passed: boolean; signalState: Record<string, unknown> }> =
+			{};
+		for (const item of watchlistItems) {
+			const indicators = await getIndicatorsForSymbol(item.symbol, "3 M");
+			if (!indicators) continue;
+			const gr = evaluateGate(indicators, gateConfig);
+			gateStates[item.symbol] = { passed: gr.passed, signalState: gr.signalState };
+		}
+
+		await db.insert(agentLogs).values({
+			level: "DECISION",
+			phase: "trading",
+			message: response.text,
+			data: JSON.stringify({ quotes: quoteSnapshot, gateStates }),
+		});
 	} catch (error) {
 		log.error({ error }, "Active trading tick failed");
 	}

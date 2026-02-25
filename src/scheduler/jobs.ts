@@ -15,6 +15,7 @@ export type JobName =
 	| "research_pipeline"
 	| "self_improvement"
 	| "trade_review"
+	| "decision_scorer"
 	| "mid_week_analysis"
 	| "end_of_week_analysis"
 	| "heartbeat";
@@ -102,6 +103,12 @@ async function executeJob(name: JobName): Promise<void> {
 		case "trade_review": {
 			const { runTradeReview } = await import("../learning/trade-reviewer.ts");
 			await runTradeReview();
+			break;
+		}
+
+		case "decision_scorer": {
+			const { runDecisionScorer } = await import("../learning/decision-scorer.ts");
+			await runDecisionScorer();
 			break;
 		}
 

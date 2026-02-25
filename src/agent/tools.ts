@@ -8,7 +8,7 @@ import { getDb } from "../db/client.ts";
 import { research, trades, watchlist } from "../db/schema.ts";
 import { researchSymbol } from "../research/pipeline.ts";
 import { updateScore } from "../research/watchlist.ts";
-import { checkTradeRisk, getMaxPositionSize } from "../risk/manager.ts";
+import { checkTradeRisk, getAtrPositionSize, getMaxPositionSize } from "../risk/manager.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { addIntention, getPendingIntentions } from "./intentions.ts";
@@ -124,11 +124,17 @@ export const toolDefinitions: Anthropic.Tool[] = [
 	},
 	{
 		name: "get_max_position_size",
-		description: "Calculate the maximum position size allowed for a given stock price",
+		description:
+			"Calculate the maximum position size for a given stock price. If ATR is provided, uses volatility-adjusted sizing (recommended). Without ATR, uses fixed percentage limits.",
 		input_schema: {
 			type: "object" as const,
 			properties: {
 				price: { type: "number", description: "Current stock price in GBP" },
+				atr: {
+					type: "number",
+					description:
+						"14-day Average True Range (from indicators). Recommended for proper position sizing.",
+				},
 			},
 			required: ["price"],
 		},
@@ -297,6 +303,11 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				return JSON.stringify(result);
 			}
 			case "get_max_position_size": {
+				const atr = input.atr as number | undefined;
+				if (atr) {
+					const result = await getAtrPositionSize(input.price as number, atr);
+					return JSON.stringify(result);
+				}
 				const result = await getMaxPositionSize(input.price as number);
 				return JSON.stringify(result);
 			}

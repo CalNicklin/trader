@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getTradingMode } from "../agent/prompts/trading-mode.ts";
+import { formatIndicatorSummary, type TechnicalIndicators } from "../analysis/indicators.ts";
 import { getConfig } from "../config.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
@@ -50,17 +51,22 @@ export async function analyzeStock(
 		fundamentals?: unknown;
 		news?: unknown;
 		historicalBars?: unknown;
+		indicators?: TechnicalIndicators | null;
 	},
 ): Promise<AnalysisResult> {
 	const client = getClient();
 	const config = getConfig();
+
+	const indicatorLine = data.indicators
+		? `\nTechnical Indicators: ${formatIndicatorSummary(data.indicators)}`
+		: "";
 
 	const prompt = `Analyze ${symbol} (LSE) based on this data:
 
 Quote: ${JSON.stringify(data.quote ?? "N/A")}
 Fundamentals: ${JSON.stringify(data.fundamentals ?? "N/A")}
 Recent News: ${JSON.stringify(data.news ?? "N/A")}
-Price History: ${JSON.stringify(data.historicalBars ?? "N/A")}
+Price History: ${JSON.stringify(data.historicalBars ?? "N/A")}${indicatorLine}
 
 Provide your analysis as JSON.`;
 

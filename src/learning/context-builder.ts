@@ -1,6 +1,6 @@
 import { desc, eq, or } from "drizzle-orm";
 import { getDb } from "../db/client.ts";
-import { tradeReviews, weeklyInsights } from "../db/schema.ts";
+import { strategyHypotheses, tradeReviews, weeklyInsights } from "../db/schema.ts";
 
 /** Build a learning brief for pre-market planning */
 export async function buildLearningBrief(): Promise<string> {
@@ -29,7 +29,14 @@ export async function buildLearningBrief(): Promise<string> {
 		.orderBy(desc(tradeReviews.createdAt))
 		.limit(5);
 
-	if (sortedInsights.length === 0 && reviews.length === 0) return "";
+	// Active and confirmed strategy hypotheses
+	const hypotheses = await db
+		.select()
+		.from(strategyHypotheses)
+		.where(or(eq(strategyHypotheses.status, "active"), eq(strategyHypotheses.status, "confirmed")))
+		.orderBy(desc(strategyHypotheses.sampleSize));
+
+	if (sortedInsights.length === 0 && reviews.length === 0 && hypotheses.length === 0) return "";
 
 	const parts: string[] = ["## Learning Brief"];
 
@@ -58,6 +65,18 @@ export async function buildLearningBrief(): Promise<string> {
 		}
 	}
 
+	if (hypotheses.length > 0) {
+		parts.push("\n### Strategy Journal (Active Hypotheses):");
+		for (const h of hypotheses) {
+			const prefix = h.status === "confirmed" ? "[CONFIRMED] " : "";
+			parts.push(`- ${prefix}${h.hypothesis}`);
+			parts.push(`  Action: ${h.actionable}`);
+			parts.push(
+				`  Evidence: ${h.evidence} (n=${h.sampleSize}, win rate=${((h.winRate ?? 0) * 100).toFixed(0)}%)`,
+			);
+		}
+	}
+
 	return parts.join("\n");
 }
 
@@ -80,7 +99,15 @@ export async function buildRecentContext(): Promise<string> {
 		.orderBy(desc(weeklyInsights.createdAt))
 		.limit(3);
 
-	if (reviews.length === 0 && criticalInsights.length === 0) return "";
+	// Only confirmed hypotheses for lighter context
+	const confirmedHypotheses = await db
+		.select()
+		.from(strategyHypotheses)
+		.where(eq(strategyHypotheses.status, "confirmed"))
+		.orderBy(desc(strategyHypotheses.sampleSize));
+
+	if (reviews.length === 0 && criticalInsights.length === 0 && confirmedHypotheses.length === 0)
+		return "";
 
 	const parts: string[] = [];
 
@@ -88,6 +115,13 @@ export async function buildRecentContext(): Promise<string> {
 		parts.push("Active warnings:");
 		for (const i of criticalInsights) {
 			parts.push(`- [${i.severity.toUpperCase()}] ${i.actionable}`);
+		}
+	}
+
+	if (confirmedHypotheses.length > 0) {
+		parts.push("Confirmed strategy rules:");
+		for (const h of confirmedHypotheses) {
+			parts.push(`- [CONFIRMED] ${h.actionable} (${h.hypothesis}, n=${h.sampleSize})`);
 		}
 	}
 
