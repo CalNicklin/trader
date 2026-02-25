@@ -2,6 +2,7 @@ import { desc, eq, gte } from "drizzle-orm";
 import { formatIndicatorSummary, getIndicatorsForSymbol } from "../analysis/indicators.ts";
 import { evaluateGate, loadGateConfig } from "../analysis/momentum-gate.ts";
 import { getAccountSummary, getPositions as getBrokerPositions } from "../broker/account.ts";
+import type { Exchange } from "../broker/contracts.ts";
 import type { Quote } from "../broker/market-data.ts";
 import { getQuotes } from "../broker/market-data.ts";
 import { getDb } from "../db/client.ts";
@@ -138,14 +139,14 @@ async function onPreMarket(): Promise<void> {
 		const learningBrief = await buildLearningBrief();
 
 		// Compute indicators for positions + top 10 watchlist (no gate filtering for day plan)
-		const indicatorSymbols = [
-			...positionRows.map((p) => p.symbol),
-			...watchlistItems.slice(0, 10).map((w) => w.symbol),
-		];
-		const uniqueSymbols = [...new Set(indicatorSymbols)];
+		const symbolExchangeMap = new Map<string, Exchange>();
+		for (const p of positionRows) symbolExchangeMap.set(p.symbol, p.exchange as Exchange);
+		for (const w of watchlistItems.slice(0, 10)) {
+			if (!symbolExchangeMap.has(w.symbol)) symbolExchangeMap.set(w.symbol, w.exchange as Exchange);
+		}
 		const indicatorSummaries: string[] = [];
-		for (const symbol of uniqueSymbols) {
-			const indicators = await getIndicatorsForSymbol(symbol, "3 M");
+		for (const [symbol, exchange] of symbolExchangeMap) {
+			const indicators = await getIndicatorsForSymbol(symbol, "3 M", exchange);
 			if (indicators) {
 				indicatorSummaries.push(formatIndicatorSummary(indicators));
 			}
@@ -331,7 +332,11 @@ async function onActiveTradingTick(): Promise<void> {
 		let gateFailCount = 0;
 
 		for (const item of watchlistItems) {
-			const indicators = await getIndicatorsForSymbol(item.symbol, "3 M");
+			const indicators = await getIndicatorsForSymbol(
+				item.symbol,
+				"3 M",
+				item.exchange as Exchange,
+			);
 			if (!indicators) continue;
 
 			const gateResult = evaluateGate(indicators, gateConfig);
@@ -433,7 +438,7 @@ Gate-qualified candidates (${gatePassCount}): ${gatePassedSummaries.length > 0 ?
 		// Compute indicators for positions (for Tier 3 context)
 		const positionIndicatorSummaries: string[] = [];
 		for (const pos of positionRows) {
-			const indicators = await getIndicatorsForSymbol(pos.symbol, "3 M");
+			const indicators = await getIndicatorsForSymbol(pos.symbol, "3 M", pos.exchange as Exchange);
 			if (indicators) {
 				positionIndicatorSummaries.push(formatIndicatorSummary(indicators));
 			}
@@ -491,7 +496,11 @@ Escalation reason: ${scan.reason}
 		const gateStates: Record<string, { passed: boolean; signalState: Record<string, unknown> }> =
 			{};
 		for (const item of watchlistItems) {
-			const indicators = await getIndicatorsForSymbol(item.symbol, "3 M");
+			const indicators = await getIndicatorsForSymbol(
+				item.symbol,
+				"3 M",
+				item.exchange as Exchange,
+			);
 			if (!indicators) continue;
 			const gr = evaluateGate(indicators, gateConfig);
 			gateStates[item.symbol] = { passed: gr.passed, signalState: gr.signalState };

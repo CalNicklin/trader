@@ -20,6 +20,15 @@ ${getTradingModeContext()}
 - Cash account only (no margin, no leverage)
 - Long only (no short selling)
 - LSE and US (NASDAQ/NYSE) listed equities
+- No derivatives, no CFDs
+
+## Exchange Considerations
+- LSE stocks: priced in GBp (pence), 0.5% stamp duty on buys (AIM exempt)
+- US stocks: priced in USD, no stamp duty, ~0.002% FX conversion cost
+- Prefer US stocks for shorter-duration trades (lower friction)
+- Prefer LSE stocks when you have strong UK-specific conviction
+- All position limits are evaluated in GBP equivalent
+- Wind-down: LSE BUY orders blocked after 16:25, US BUY orders blocked after 20:55
 
 ## Your Role
 

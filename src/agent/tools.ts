@@ -20,18 +20,23 @@ const log = createChildLogger({ module: "agent-tools" });
 export const toolDefinitions: Anthropic.Tool[] = [
 	{
 		name: "get_quote",
-		description: "Get current market quote for an LSE-listed stock",
+		description: "Get current market quote for a stock",
 		input_schema: {
 			type: "object" as const,
 			properties: {
-				symbol: { type: "string", description: "Stock ticker symbol (e.g., VOD, SHEL, AZN)" },
+				symbol: { type: "string", description: "Stock ticker symbol (e.g., SHEL, AAPL)" },
+				exchange: {
+					type: "string",
+					enum: ["LSE", "NASDAQ", "NYSE"],
+					description: "Exchange. Default: LSE",
+				},
 			},
 			required: ["symbol"],
 		},
 	},
 	{
 		name: "get_multiple_quotes",
-		description: "Get market quotes for multiple LSE-listed stocks at once",
+		description: "Get market quotes for multiple stocks at once (all same exchange)",
 		input_schema: {
 			type: "object" as const,
 			properties: {
@@ -39,6 +44,11 @@ export const toolDefinitions: Anthropic.Tool[] = [
 					type: "array",
 					items: { type: "string" },
 					description: "Array of stock ticker symbols",
+				},
+				exchange: {
+					type: "string",
+					enum: ["LSE", "NASDAQ", "NYSE"],
+					description: "Exchange for all symbols. Default: LSE",
 				},
 			},
 			required: ["symbols"],
@@ -54,6 +64,11 @@ export const toolDefinitions: Anthropic.Tool[] = [
 				duration: {
 					type: "string",
 					description: "Duration (e.g., '1 M', '3 M', '1 Y'). Default: '1 M'",
+				},
+				exchange: {
+					type: "string",
+					enum: ["LSE", "NASDAQ", "NYSE"],
+					description: "Exchange. Default: LSE",
 				},
 			},
 			required: ["symbol"],
@@ -93,6 +108,11 @@ export const toolDefinitions: Anthropic.Tool[] = [
 			type: "object" as const,
 			properties: {
 				symbol: { type: "string", description: "Stock ticker symbol to research" },
+				exchange: {
+					type: "string",
+					enum: ["LSE", "NASDAQ", "NYSE"],
+					description: "Exchange. Default: LSE",
+				},
 			},
 			required: ["symbol"],
 		},
@@ -114,6 +134,11 @@ export const toolDefinitions: Anthropic.Tool[] = [
 			type: "object" as const,
 			properties: {
 				symbol: { type: "string" },
+				exchange: {
+					type: "string",
+					enum: ["LSE", "NASDAQ", "NYSE"],
+					description: "Exchange. Default: LSE",
+				},
 				side: { type: "string", enum: ["BUY", "SELL"] },
 				quantity: { type: "number" },
 				estimatedPrice: { type: "number" },
@@ -146,6 +171,11 @@ export const toolDefinitions: Anthropic.Tool[] = [
 			type: "object" as const,
 			properties: {
 				symbol: { type: "string", description: "Stock ticker symbol" },
+				exchange: {
+					type: "string",
+					enum: ["LSE", "NASDAQ", "NYSE"],
+					description: "Exchange the stock trades on. Default: LSE",
+				},
 				side: { type: "string", enum: ["BUY", "SELL"] },
 				quantity: { type: "number", description: "Number of shares" },
 				orderType: { type: "string", enum: ["LIMIT", "MARKET"] },
@@ -157,7 +187,7 @@ export const toolDefinitions: Anthropic.Tool[] = [
 				reasoning: { type: "string", description: "Explanation of why this trade is being made" },
 				confidence: { type: "number", description: "Confidence level 0.0-1.0" },
 			},
-			required: ["symbol", "side", "quantity", "orderType", "reasoning", "confidence"],
+			required: ["symbol", "exchange", "side", "quantity", "orderType", "reasoning", "confidence"],
 		},
 	},
 	{
@@ -178,11 +208,16 @@ export const toolDefinitions: Anthropic.Tool[] = [
 	},
 	{
 		name: "search_contracts",
-		description: "Search for LSE-listed stock contracts matching a pattern",
+		description: "Search for stock contracts matching a pattern (LSE and US exchanges)",
 		input_schema: {
 			type: "object" as const,
 			properties: {
 				pattern: { type: "string", description: "Search pattern for stock symbol or name" },
+				exchange: {
+					type: "string",
+					enum: ["LSE", "NASDAQ", "NYSE"],
+					description: "Limit search to a specific exchange. Omit to search all.",
+				},
 			},
 			required: ["pattern"],
 		},
@@ -207,6 +242,11 @@ export const toolDefinitions: Anthropic.Tool[] = [
 			type: "object" as const,
 			properties: {
 				symbol: { type: "string", description: "Stock ticker symbol" },
+				exchange: {
+					type: "string",
+					enum: ["LSE", "NASDAQ", "NYSE"],
+					description: "Exchange. Default: LSE",
+				},
 				condition: {
 					type: "string",
 					description:
@@ -228,17 +268,22 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 	try {
 		switch (name) {
 			case "get_quote": {
-				const quote = await getQuote(input.symbol as string);
+				const exchange = (input.exchange as "LSE" | "NASDAQ" | "NYSE" | undefined) ?? "LSE";
+				const quote = await getQuote(input.symbol as string, exchange);
 				return JSON.stringify(quote);
 			}
 			case "get_multiple_quotes": {
-				const quotes = await getQuotes(input.symbols as string[]);
+				const exchange = (input.exchange as "LSE" | "NASDAQ" | "NYSE" | undefined) ?? "LSE";
+				const quotes = await getQuotes(input.symbols as string[], { exchange });
 				return JSON.stringify(Object.fromEntries(quotes));
 			}
 			case "get_historical_bars": {
+				const exchange = (input.exchange as "LSE" | "NASDAQ" | "NYSE" | undefined) ?? "LSE";
 				const bars = await getHistoricalBars(
 					input.symbol as string,
 					(input.duration as string) ?? "1 M",
+					undefined,
+					exchange,
 				);
 				return JSON.stringify(bars);
 			}
@@ -384,7 +429,8 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				});
 			}
 			case "search_contracts": {
-				const results = await searchContracts(input.pattern as string);
+				const exchange = input.exchange as "LSE" | "NASDAQ" | "NYSE" | undefined;
+				const results = await searchContracts(input.pattern as string, exchange);
 				return JSON.stringify(results);
 			}
 			case "log_decision": {

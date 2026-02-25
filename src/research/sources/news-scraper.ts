@@ -12,47 +12,56 @@ const parser = new Parser({
 });
 const rateLimiter = new RateLimiter(15, 60000); // 15 feeds per minute
 
-const RSS_FEEDS = [
+type FeedMarket = "UK" | "US" | "global";
+
+interface RssFeed {
+	name: string;
+	url: string;
+	market: FeedMarket;
+}
+
+const RSS_FEEDS: readonly RssFeed[] = [
 	// UK-focused
-	{
-		name: "BBC Business",
-		url: "https://feeds.bbci.co.uk/news/business/rss.xml",
-	},
-	{
-		name: "FT Markets",
-		url: "https://www.ft.com/markets?format=rss",
-	},
-	{
-		name: "Yahoo Finance UK",
-		url: "https://uk.finance.yahoo.com/rss/topstories",
-	},
+	{ name: "BBC Business", url: "https://feeds.bbci.co.uk/news/business/rss.xml", market: "UK" },
+	{ name: "FT Markets", url: "https://www.ft.com/markets?format=rss", market: "UK" },
+	{ name: "Yahoo Finance UK", url: "https://uk.finance.yahoo.com/rss/topstories", market: "UK" },
 	{
 		name: "Yahoo Finance FTSE",
 		url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^FTSE&region=UK&lang=en-GB",
+		market: "UK",
 	},
 	{
 		name: "Proactive Investors UK",
 		url: "https://www.proactiveinvestors.co.uk/rss/all_news",
+		market: "UK",
 	},
+	// US-focused
+	{
+		name: "CNBC Markets",
+		url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258",
+		market: "US",
+	},
+	{ name: "Yahoo Finance US", url: "https://finance.yahoo.com/rss/topstories", market: "US" },
+	{ name: "Seeking Alpha", url: "https://seekingalpha.com/market_currents.xml", market: "US" },
 	// Global markets
 	{
 		name: "MarketWatch",
 		url: "https://feeds.marketwatch.com/marketwatch/topstories",
+		market: "global",
 	},
 	{
 		name: "CNBC World",
 		url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19794221",
+		market: "global",
 	},
-	{
-		name: "Investing.com UK",
-		url: "https://www.investing.com/rss/news_301.rss",
-	},
+	{ name: "Investing.com UK", url: "https://www.investing.com/rss/news_301.rss", market: "global" },
 ];
 
 export interface NewsItem {
 	title: string;
 	link: string;
 	source: string;
+	market: FeedMarket;
 	pubDate: string;
 	snippet: string;
 }
@@ -70,6 +79,7 @@ export async function fetchNews(maxItemsPerFeed: number = 10): Promise<NewsItem[
 				title: item.title ?? "",
 				link: item.link ?? "",
 				source: feed.name,
+				market: feed.market,
 				pubDate: item.pubDate ?? item.isoDate ?? "",
 				snippet: (item.contentSnippet ?? item.content ?? "").substring(0, 300),
 			}));

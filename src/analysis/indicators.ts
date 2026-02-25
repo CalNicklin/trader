@@ -1,3 +1,4 @@
+import type { Exchange } from "../broker/contracts.ts";
 import type { HistoricalBar } from "../broker/market-data.ts";
 
 export interface TechnicalIndicators {
@@ -266,7 +267,14 @@ export function computeIndicators(
 const barsCache = new Map<string, { bars: HistoricalBar[]; fetchedAt: number }>();
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
-function tradingDayElapsedFraction(): number | null {
+/** Session boundaries in London-time minutes from midnight */
+const SESSION_TIMES: Record<string, { openMinute: number; totalMinutes: number }> = {
+	LSE: { openMinute: 8 * 60, totalMinutes: 510 }, // 08:00-16:30 = 510 min
+	NASDAQ: { openMinute: 14 * 60 + 30, totalMinutes: 390 }, // 14:30-21:00 = 390 min
+	NYSE: { openMinute: 14 * 60 + 30, totalMinutes: 390 },
+};
+
+function tradingDayElapsedFraction(exchange: Exchange = "LSE"): number | null {
 	const now = new Date();
 	const formatter = new Intl.DateTimeFormat("en-GB", {
 		timeZone: "Europe/London",
@@ -276,8 +284,11 @@ function tradingDayElapsedFraction(): number | null {
 	const parts = formatter.formatToParts(now);
 	const hour = Number(parts.find((p) => p.type === "hour")?.value);
 	const minute = Number(parts.find((p) => p.type === "minute")?.value);
-	const minutesSinceOpen = (hour - 8) * 60 + minute;
-	const totalMinutes = 510; // 08:00 to 16:30
+
+	const session = SESSION_TIMES[exchange] ?? SESSION_TIMES.LSE!;
+	const { openMinute, totalMinutes } = session;
+	const currentMinute = hour * 60 + minute;
+	const minutesSinceOpen = currentMinute - openMinute;
 
 	if (minutesSinceOpen <= 0 || minutesSinceOpen >= totalMinutes) return null;
 	return minutesSinceOpen / totalMinutes;
@@ -286,16 +297,17 @@ function tradingDayElapsedFraction(): number | null {
 export async function getIndicatorsForSymbol(
 	symbol: string,
 	duration = "3 M",
+	exchange: Exchange = "LSE",
 ): Promise<TechnicalIndicators | null> {
-	const cacheKey = `${symbol}:${duration}`;
+	const cacheKey = `${symbol}:${duration}:${exchange}`;
 	const cached = barsCache.get(cacheKey);
-	const fraction = tradingDayElapsedFraction();
+	const fraction = tradingDayElapsedFraction(exchange);
 	if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
 		return computeIndicators(symbol, cached.bars, fraction);
 	}
 	try {
 		const { getHistoricalBars } = await import("../broker/market-data.ts");
-		const bars = await getHistoricalBars(symbol, duration);
+		const bars = await getHistoricalBars(symbol, duration, undefined, exchange);
 		if (bars.length === 0) return null;
 		barsCache.set(cacheKey, { bars, fetchedAt: Date.now() });
 		return computeIndicators(symbol, bars, fraction);

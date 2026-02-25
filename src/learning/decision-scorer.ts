@@ -29,7 +29,8 @@ interface MissedOppAssessment {
 }
 
 const EXTRACT_DECISIONS_PROMPT = `Extract stock-level decisions from this trading agent log entry. For each stock mentioned, identify:
-- symbol: the LSE ticker (e.g. SHEL, AZN, HSBA)
+- symbol: the stock ticker (e.g. SHEL, AZN, AAPL, MSFT)
+- exchange: the exchange (LSE, NASDAQ, or NYSE)
 - statedAction: what the agent decided (BUY, SELL, HOLD, WATCH, or PASS if explicitly rejected)
 - reason: brief summary of why (max 50 chars)
 

@@ -233,7 +233,7 @@ async function updateTrailingStops(
 		let atr14: number | null = null;
 		try {
 			const { getIndicatorsForSymbol } = await import("../analysis/indicators.ts");
-			const indicators = await getIndicatorsForSymbol(pos.symbol, "3 M");
+			const indicators = await getIndicatorsForSymbol(pos.symbol, "3 M", pos.exchange as Exchange);
 			atr14 = indicators?.atr14 ?? null;
 		} catch {
 			// Indicators not available — skip trailing stop update
