@@ -5,14 +5,27 @@ import { createChildLogger } from "../utils/logger.ts";
 
 const log = createChildLogger({ module: "research-watchlist" });
 
-/** Scoring weights for watchlist ranking */
-export const SCORING_WEIGHTS = {
-	sentimentWeight: 0.3,
-	confidenceWeight: 0.2,
-	fundamentalWeight: 0.25,
-	momentumWeight: 0.15,
-	liquidityWeight: 0.1,
-};
+export interface ScoreInput {
+	qualityPass: "pass" | "marginal" | "fail" | null;
+	changePercentage: number;
+	daysSinceResearch: number;
+}
+
+/**
+ * Pure scoring formula: qualityMultiplier * momentumProxy * recencyDecay.
+ * Returns 0-100. quality_pass="fail" always returns 0.
+ */
+export function computeScore(input: ScoreInput): number {
+	const qualityMultiplier =
+		input.qualityPass === "pass" ? 1.0 : input.qualityPass === "marginal" ? 0.5 : 0;
+
+	const momentumProxy = Math.max(0, Math.min(100, (input.changePercentage + 10) * (100 / 30)));
+
+	const recencyDecay = Math.max(0, 1 - (input.daysSinceResearch / 7) * 0.05);
+
+	const score = qualityMultiplier * momentumProxy * recencyDecay;
+	return Math.max(0, Math.min(100, score));
+}
 
 export interface WatchlistEntry {
 	symbol: string;
@@ -51,7 +64,6 @@ export async function removeFromWatchlist(symbol: string): Promise<void> {
 export async function updateScore(symbol: string): Promise<number> {
 	const db = getDb();
 
-	// Get latest research for this symbol
 	const latestResearch = await db
 		.select()
 		.from(research)
@@ -64,20 +76,19 @@ export async function updateScore(symbol: string): Promise<number> {
 	}
 
 	const r = latestResearch[0]!;
+	const rawData = r.rawData ? (JSON.parse(r.rawData) as Record<string, unknown>) : null;
 
-	// Calculate composite score (0-100)
-	const sentimentScore = (((r.sentiment ?? 0) + 1) / 2) * 100; // Normalize -1..1 to 0..100
-	const confidenceScore = (r.confidence ?? 0) * 100;
+	const lastResearched = r.createdAt ? new Date(r.createdAt) : new Date();
+	const daysSinceResearch = (Date.now() - lastResearched.getTime()) / (1000 * 60 * 60 * 24);
 
-	// Action bonus
-	const actionBonus = r.suggestedAction === "BUY" ? 20 : r.suggestedAction === "WATCH" ? 5 : 0;
-
-	const score =
-		sentimentScore * SCORING_WEIGHTS.sentimentWeight +
-		confidenceScore * SCORING_WEIGHTS.confidenceWeight +
-		actionBonus;
-
-	const clampedScore = Math.max(0, Math.min(100, score));
+	const clampedScore = computeScore({
+		qualityPass: (rawData?.quality_pass as ScoreInput["qualityPass"]) ?? null,
+		changePercentage:
+			(rawData?.changePercentage as number) ??
+			((rawData?.quote as Record<string, unknown>)?.changePercentage as number) ??
+			0,
+		daysSinceResearch,
+	});
 
 	await db
 		.update(watchlist)

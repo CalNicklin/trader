@@ -263,7 +263,7 @@ export async function researchSymbol(
 	const dataQuality =
 		quote && fundamentals ? "full" : quote || fundamentals ? "partial" : "minimal";
 
-	// Store research results
+	// Store research results with Layer 2 quality signals
 	const db = getDb();
 	await db.insert(research).values({
 		symbol,
@@ -273,6 +273,13 @@ export async function researchSymbol(
 			fundamentals,
 			newsCount: newsItems.length,
 			dataQuality,
+			changePercentage: quote?.changePercent ?? 0,
+			quality_pass: analysis.quality_pass ?? null,
+			quality_flags: analysis.quality_flags ?? [],
+			catalyst: analysis.catalyst ?? null,
+			catalyst_detail: analysis.catalyst_detail ?? null,
+			fundamental_value: analysis.fundamental_value ?? null,
+			earnings_proximity: analysis.earnings_proximity ?? null,
 		}),
 		sentiment: analysis.sentiment,
 		bullCase: analysis.bullCase,
