@@ -5,6 +5,7 @@ import type { Exchange } from "../broker/contracts.ts";
 import { getDb } from "../db/client.ts";
 import { dailySnapshots, positions, trades, watchlist } from "../db/schema.ts";
 import { getYahooQuote } from "../research/sources/yahoo-finance.ts";
+import { convertCurrency } from "../utils/fx.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { isSectorExcluded, isSymbolExcluded } from "./exclusions.ts";
 import { getActiveLimits, getTradeIntervalMin, HARD_LIMITS } from "./limits.ts";
@@ -66,27 +67,35 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 		);
 	}
 
+	// --- Currency allowed check ---
+	if (!HARD_LIMITS.ISA_ALLOWED_CURRENCIES.includes(currency)) {
+		reasons.push(
+			`Currency ${currency} not in allowed list: ${HARD_LIMITS.ISA_ALLOWED_CURRENCIES.join(", ")}`,
+		);
+	}
+
 	// --- Account checks ---
 	const mode = getTradingMode();
 	const limits = getActiveLimits(mode);
 	const account = await getAccountSummary();
 	const tradeValue = proposal.quantity * proposal.estimatedPrice;
+	const tradeValueGbp = await convertCurrency(tradeValue, currency, "GBP");
 
-	// Position size as % of portfolio
-	const positionPct = (tradeValue / account.netLiquidation) * 100;
+	// Position size as % of portfolio (GBP-equivalent comparison)
+	const positionPct = (tradeValueGbp / account.netLiquidation) * 100;
 	if (positionPct > limits.MAX_POSITION_PCT) {
 		reasons.push(`Position ${positionPct.toFixed(1)}% exceeds max ${limits.MAX_POSITION_PCT}%`);
 	}
 
 	// Hard cap (GBP equivalent)
-	if (tradeValue > limits.MAX_POSITION_VALUE) {
+	if (tradeValueGbp > limits.MAX_POSITION_VALUE) {
 		reasons.push(
-			`Position value ${tradeValue.toFixed(0)} exceeds hard cap ${limits.MAX_POSITION_VALUE}`,
+			`Position value £${tradeValueGbp.toFixed(0)} exceeds hard cap £${limits.MAX_POSITION_VALUE}`,
 		);
 	}
 
-	// Cash reserve check
-	const cashAfterTrade = account.totalCashValue - tradeValue;
+	// Cash reserve check (convert trade value to GBP for cash comparison)
+	const cashAfterTrade = account.totalCashValue - tradeValueGbp;
 	const cashReservePct = (cashAfterTrade / account.netLiquidation) * 100;
 	if (cashReservePct < limits.MIN_CASH_RESERVE_PCT) {
 		reasons.push(
@@ -97,7 +106,9 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 	// --- Position count check ---
 	const db = getDb();
 	const openPositions = await db.select().from(positions);
-	const existingPosition = openPositions.find((p) => p.symbol === proposal.symbol);
+	const existingPosition = openPositions.find(
+		(p) => p.symbol === proposal.symbol && p.exchange === exchange,
+	);
 	if (!existingPosition && openPositions.length >= limits.MAX_POSITIONS) {
 		reasons.push(`Max positions (${limits.MAX_POSITIONS}) reached`);
 	}
@@ -271,23 +282,48 @@ export function calculateStopLoss(entryPrice: number, atr?: number): number {
 	return entryPrice * (1 - HARD_LIMITS.PER_TRADE_STOP_LOSS_PCT / 100);
 }
 
-/** Calculate maximum position size respecting all limits */
-export async function getMaxPositionSize(
+interface PortfolioSnapshot {
+	netLiquidation: number;
+	totalCashValue: number;
+}
+
+interface PositionLimits {
+	MAX_POSITION_PCT: number;
+	MAX_POSITION_VALUE: number;
+	MIN_CASH_RESERVE_PCT: number;
+}
+
+/** Pure calculation of max position size. All limits are GBP-denominated; fxRate converts to native currency. */
+export function calculateMaxPosition(
 	price: number,
-): Promise<{ maxQuantity: number; maxValue: number }> {
-	const limits = getActiveLimits(getTradingMode());
-	const account = await getAccountSummary();
-
-	const pctLimit = (account.netLiquidation * limits.MAX_POSITION_PCT) / 100;
+	currency: "GBP" | "USD",
+	portfolio: PortfolioSnapshot,
+	limits: PositionLimits,
+	fxRate: number,
+): { maxQuantity: number; maxValue: number } {
+	const pctLimit = (portfolio.netLiquidation * limits.MAX_POSITION_PCT) / 100;
 	const valueLimit = limits.MAX_POSITION_VALUE;
-
 	const availableCash =
-		account.totalCashValue - (account.netLiquidation * limits.MIN_CASH_RESERVE_PCT) / 100;
+		portfolio.totalCashValue - (portfolio.netLiquidation * limits.MIN_CASH_RESERVE_PCT) / 100;
 
-	const maxValue = Math.min(pctLimit, valueLimit, Math.max(0, availableCash));
+	const maxValueGbp = Math.min(pctLimit, valueLimit, Math.max(0, availableCash));
+	const maxValue = currency === "GBP" ? maxValueGbp : maxValueGbp * fxRate;
 	const maxQuantity = Math.floor(maxValue / price);
 
 	return { maxQuantity, maxValue };
+}
+
+/** Calculate maximum position size respecting all limits */
+export async function getMaxPositionSize(
+	price: number,
+	exchange: Exchange = "LSE",
+): Promise<{ maxQuantity: number; maxValue: number }> {
+	const currency: "GBP" | "USD" = exchange === "LSE" ? "GBP" : "USD";
+	const limits = getActiveLimits(getTradingMode());
+	const account = await getAccountSummary();
+	const fxRate = currency !== "GBP" ? await convertCurrency(1, "GBP", currency) : 1;
+
+	return calculateMaxPosition(price, currency, account, limits, fxRate);
 }
 
 export interface AtrPositionSize {
@@ -299,26 +335,35 @@ export interface AtrPositionSize {
 	riskTotal: number;
 }
 
-/**
- * ATR-based position sizing. Risk per trade = RISK_PER_TRADE_PCT of portfolio.
- * Stop distance = STOP_LOSS_ATR_MULTIPLIER x ATR.
- * Cross-checks against existing hard limits.
- */
-export async function getAtrPositionSize(price: number, atr: number): Promise<AtrPositionSize> {
-	const limits = getActiveLimits(getTradingMode());
-	const account = await getAccountSummary();
+interface AtrLimits extends PositionLimits {
+	STOP_LOSS_ATR_MULTIPLIER: number;
+	RISK_PER_TRADE_PCT: number;
+	TARGET_ATR_MULTIPLIER: number;
+}
 
+/** Pure ATR-based position sizing. GBP limits converted to native currency via fxRate. */
+export function calculateAtrPosition(
+	price: number,
+	atr: number,
+	currency: "GBP" | "USD",
+	portfolio: PortfolioSnapshot,
+	limits: AtrLimits,
+	fxRate: number,
+): AtrPositionSize {
 	const riskPerShare = atr * limits.STOP_LOSS_ATR_MULTIPLIER;
-	const riskBudget = (account.netLiquidation * limits.RISK_PER_TRADE_PCT) / 100;
+	const riskBudgetGbp = (portfolio.netLiquidation * limits.RISK_PER_TRADE_PCT) / 100;
+	const riskBudget = currency === "GBP" ? riskBudgetGbp : riskBudgetGbp * fxRate;
 	const atrBasedQuantity = Math.floor(riskBudget / riskPerShare);
 	const atrBasedValue = atrBasedQuantity * price;
 
-	const pctLimit = (account.netLiquidation * limits.MAX_POSITION_PCT) / 100;
-	const valueLimit = limits.MAX_POSITION_VALUE;
-	const availableCash =
-		account.totalCashValue - (account.netLiquidation * limits.MIN_CASH_RESERVE_PCT) / 100;
+	const pctLimitGbp = (portfolio.netLiquidation * limits.MAX_POSITION_PCT) / 100;
+	const valueLimitGbp = limits.MAX_POSITION_VALUE;
+	const availableCashGbp =
+		portfolio.totalCashValue - (portfolio.netLiquidation * limits.MIN_CASH_RESERVE_PCT) / 100;
 
-	const maxValue = Math.min(atrBasedValue, pctLimit, valueLimit, Math.max(0, availableCash));
+	const maxValueGbp = Math.min(pctLimitGbp, valueLimitGbp, Math.max(0, availableCashGbp));
+	const capNative = currency === "GBP" ? maxValueGbp : maxValueGbp * fxRate;
+	const maxValue = Math.min(atrBasedValue, capNative);
 	const maxQuantity = Math.floor(maxValue / price);
 
 	const stopLossPrice = price - riskPerShare;
@@ -332,4 +377,22 @@ export async function getAtrPositionSize(price: number, atr: number): Promise<At
 		riskPerShare,
 		riskTotal: maxQuantity * riskPerShare,
 	};
+}
+
+/**
+ * ATR-based position sizing. Risk per trade = RISK_PER_TRADE_PCT of portfolio.
+ * Stop distance = STOP_LOSS_ATR_MULTIPLIER x ATR.
+ * Cross-checks against existing hard limits.
+ */
+export async function getAtrPositionSize(
+	price: number,
+	atr: number,
+	exchange: Exchange = "LSE",
+): Promise<AtrPositionSize> {
+	const currency: "GBP" | "USD" = exchange === "LSE" ? "GBP" : "USD";
+	const limits = getActiveLimits(getTradingMode());
+	const account = await getAccountSummary();
+	const fxRate = currency !== "GBP" ? await convertCurrency(1, "GBP", currency) : 1;
+
+	return calculateAtrPosition(price, atr, currency, account, limits, fxRate);
 }

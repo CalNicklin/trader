@@ -338,8 +338,10 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				return JSON.stringify(items);
 			}
 			case "check_risk": {
+				const exchange = (input.exchange as "LSE" | "NASDAQ" | "NYSE" | undefined) ?? "LSE";
 				const result = await checkTradeRisk({
 					symbol: input.symbol as string,
+					exchange,
 					side: input.side as "BUY" | "SELL",
 					quantity: input.quantity as number,
 					estimatedPrice: input.estimatedPrice as number,
@@ -348,12 +350,13 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				return JSON.stringify(result);
 			}
 			case "get_max_position_size": {
+				const exchange = (input.exchange as "LSE" | "NASDAQ" | "NYSE" | undefined) ?? "LSE";
 				const atr = input.atr as number | undefined;
 				if (atr) {
-					const result = await getAtrPositionSize(input.price as number, atr);
+					const result = await getAtrPositionSize(input.price as number, atr, exchange);
 					return JSON.stringify(result);
 				}
-				const result = await getMaxPositionSize(input.price as number);
+				const result = await getMaxPositionSize(input.price as number, exchange);
 				return JSON.stringify(result);
 			}
 			case "place_trade": {
@@ -369,7 +372,7 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 
 				const riskResult =
 					side === "BUY"
-						? await checkTradeRisk({ symbol, side, quantity, estimatedPrice })
+						? await checkTradeRisk({ symbol, exchange, side, quantity, estimatedPrice })
 						: { approved: true, reasons: [] as string[] };
 
 				const gateError = checkTradeGates({
