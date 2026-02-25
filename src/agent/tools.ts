@@ -154,11 +154,16 @@ export const toolDefinitions: Anthropic.Tool[] = [
 		input_schema: {
 			type: "object" as const,
 			properties: {
-				price: { type: "number", description: "Current stock price in GBP" },
+				price: { type: "number", description: "Current stock price in native currency" },
 				atr: {
 					type: "number",
 					description:
 						"14-day Average True Range (from indicators). Recommended for proper position sizing.",
+				},
+				exchange: {
+					type: "string",
+					enum: ["LSE", "NASDAQ", "NYSE"],
+					description: "Exchange for currency-aware sizing. Default: LSE",
 				},
 			},
 			required: ["price"],
@@ -316,7 +321,8 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 			}
 			case "research_symbol": {
 				const symbol = (input.symbol as string).toUpperCase();
-				await researchSymbol(symbol, []);
+				const exchange = (input.exchange as "LSE" | "NASDAQ" | "NYSE" | undefined) ?? "LSE";
+				await researchSymbol(symbol, [], exchange);
 				await updateScore(symbol);
 				// Return the fresh analysis
 				const db = getDb();
