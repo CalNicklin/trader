@@ -13,6 +13,7 @@ interface ScreenerResult {
 	isEtf: boolean;
 	isFund: boolean;
 	isActivelyTrading: boolean;
+	changePercentage?: number;
 }
 
 export interface ScreenerDeps {
@@ -26,12 +27,31 @@ export interface LSECandidate {
 	sector: string;
 }
 
-const SECTOR_ROTATION: Record<number, { sector?: string; label: string }> = {
-	1: { sector: "Technology", label: "Technology" },
-	2: { sector: "Healthcare", label: "Healthcare" },
-	3: { label: "Small-caps (all sectors)" },
-	4: { sector: "Financial Services", label: "Financial Services" },
-	5: { sector: "Consumer Cyclical", label: "Consumer Cyclical" },
+const SCREENING_STRATEGY: Record<number, { label: string; smallCap: boolean }> = {
+	0: { label: "Weekend (no screen)", smallCap: false },
+	1: { label: "Momentum — all sectors", smallCap: false },
+	2: { label: "Momentum — all sectors", smallCap: false },
+	3: { label: "Momentum + small-caps", smallCap: true },
+	4: { label: "Momentum — all sectors", smallCap: false },
+	5: { label: "Momentum — all sectors", smallCap: false },
+	6: { label: "Weekend (no screen)", smallCap: false },
+};
+
+const MOMENTUM_PARAMS: Record<string, string> = {
+	country: "GB",
+	isActivelyTrading: "true",
+	limit: "50",
+	marketCapMoreThan: "100000000",
+	volumeMoreThan: "100000",
+};
+
+const SMALL_CAP_PARAMS: Record<string, string> = {
+	country: "GB",
+	isActivelyTrading: "true",
+	limit: "25",
+	marketCapMoreThan: "50000000",
+	marketCapLessThan: "2000000000",
+	volumeMoreThan: "100000",
 };
 
 /** Build production ScreenerDeps from fmpFetch. Lazy import avoids pulling config at module load. */
@@ -41,28 +61,22 @@ export async function createFMPScreenerDeps(): Promise<ScreenerDeps> {
 	const log = createChildLogger({ module: "lse-screener" });
 
 	const dayOfWeek = new Date().getDay();
-	const rotation = SECTOR_ROTATION[dayOfWeek] ?? { label: "all sectors" };
-
-	const params: Record<string, string> = {
-		country: "GB",
-		isActivelyTrading: "true",
-		limit: "50",
+	const strategy = SCREENING_STRATEGY[dayOfWeek] ?? {
+		label: "Momentum — all sectors",
+		smallCap: false,
 	};
 
-	if (!rotation.sector) {
-		params.marketCapMoreThan = "50000000";
-		params.marketCapLessThan = "2000000000";
-		params.volumeMoreThan = "100000";
-	} else {
-		params.sector = rotation.sector;
-		params.marketCapMoreThan = "100000000";
-		params.volumeMoreThan = "50000";
-	}
-
-	log.info({ rotation: rotation.label, day: dayOfWeek }, "Screening LSE stocks");
+	log.info({ strategy: strategy.label, day: dayOfWeek }, "Screening LSE stocks");
 
 	return {
-		fetchScreener: () => fmpFetch<ScreenerResult[]>("/company-screener", params),
+		fetchScreener: async () => {
+			const momentum = await fmpFetch<ScreenerResult[]>("/company-screener", MOMENTUM_PARAMS);
+			if (!strategy.smallCap) return momentum;
+
+			const smallCap = await fmpFetch<ScreenerResult[]>("/company-screener", SMALL_CAP_PARAMS);
+			const combined = [...(momentum ?? []), ...(smallCap ?? [])];
+			return combined.length > 0 ? combined : null;
+		},
 		searchName: (query: string) =>
 			fmpFetch<FMPSearchResult[]>("/search-name", { query, exchange: "LSE" }),
 	};
@@ -77,10 +91,14 @@ export async function screenLSEStocks(deps: ScreenerDeps): Promise<LSECandidate[
 	const screenerResults = await deps.fetchScreener();
 	if (!screenerResults || screenerResults.length === 0) return [];
 
+	const sorted = [...screenerResults].sort(
+		(a, b) => (b.changePercentage ?? 0) - (a.changePercentage ?? 0),
+	);
+
 	const seen = new Set<string>();
 	const candidates: LSECandidate[] = [];
 
-	for (const result of screenerResults) {
+	for (const result of sorted) {
 		if (result.isEtf || result.isFund) continue;
 
 		const searchResults = await deps.searchName(result.companyName);

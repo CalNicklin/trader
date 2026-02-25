@@ -2,7 +2,62 @@ import { describe, expect, test } from "bun:test";
 import type { FMPSearchResult } from "../src/research/sources/lse-resolver.ts";
 import { screenLSEStocks } from "../src/research/sources/lse-screener.ts";
 
+function makeScreenerResult(
+	overrides: Partial<{
+		symbol: string;
+		companyName: string;
+		sector: string;
+		changePercentage: number;
+	}>,
+) {
+	return {
+		symbol: overrides.symbol ?? "TEST",
+		companyName: overrides.companyName ?? "Test PLC",
+		marketCap: 1e9,
+		sector: overrides.sector ?? "Technology",
+		industry: "Software",
+		country: "GB",
+		price: 100,
+		volume: 1e6,
+		exchange: "NYSE",
+		isEtf: false,
+		isFund: false,
+		isActivelyTrading: true,
+		changePercentage: overrides.changePercentage ?? 0,
+	};
+}
+
 describe("screenLSEStocks", () => {
+	test("returns candidates sorted by changePercentage descending (momentum first)", async () => {
+		const mockFetchScreener = async () => [
+			makeScreenerResult({ symbol: "LOW", companyName: "Low Momentum PLC", changePercentage: 0.5 }),
+			makeScreenerResult({
+				symbol: "HIGH",
+				companyName: "High Momentum PLC",
+				changePercentage: 8.2,
+			}),
+			makeScreenerResult({ symbol: "MID", companyName: "Mid Momentum PLC", changePercentage: 3.1 }),
+		];
+
+		const mockSearchName = async (query: string): Promise<FMPSearchResult[] | null> => {
+			const map: Record<string, string> = {
+				"High Momentum PLC": "HIGH.L",
+				"Mid Momentum PLC": "MID.L",
+				"Low Momentum PLC": "LOW.L",
+			};
+			const sym = map[query];
+			if (!sym) return null;
+			return [{ symbol: sym, name: query, currency: "GBp", exchange: "LSE" }];
+		};
+
+		const results = await screenLSEStocks({
+			fetchScreener: mockFetchScreener,
+			searchName: mockSearchName,
+		});
+
+		expect(results.map((r) => r.symbol)).toEqual(["HIGH", "MID", "LOW"]);
+	});
+
 	test("resolves LSE symbols from country=GB screener results via name search", async () => {
 		const mockFetchScreener = async () => [
 			{
