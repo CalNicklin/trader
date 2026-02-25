@@ -20,6 +20,32 @@ import { addToWatchlist, getActiveWatchlist, getStaleSymbols, updateScore } from
 
 const log = createChildLogger({ module: "research-pipeline" });
 
+interface DiscoveredStock {
+	symbol: string;
+	name: string;
+	exchange: Exchange;
+}
+
+/** Parse LLM JSON output for news-driven stock discovery. Extracts symbol, name, exchange. */
+export function parseNewsDiscovery(text: string): DiscoveredStock[] {
+	const jsonMatch = text.match(/\[[\s\S]*\]/);
+	if (!jsonMatch) return [];
+
+	const raw = JSON.parse(jsonMatch[0]) as Array<{
+		symbol?: string;
+		name?: string;
+		exchange?: string;
+	}>;
+
+	return raw
+		.filter((r) => r.symbol && r.name)
+		.map((r) => ({
+			symbol: r.symbol!.toUpperCase().replace(".L", ""),
+			name: r.name!,
+			exchange: (r.exchange as Exchange) ?? "LSE",
+		}));
+}
+
 /** Main research pipeline - runs during research window */
 export async function runResearchPipeline(): Promise<void> {
 	log.info("Research pipeline starting");
@@ -212,31 +238,25 @@ ${headlines}`,
 			.map((b) => b.text)
 			.join("");
 
-		const jsonMatch = text.match(/\[[\s\S]*\]/);
-		if (!jsonMatch) return;
+		const discovered = parseNewsDiscovery(text);
+		if (discovered.length === 0) return;
 
-		const discovered = JSON.parse(jsonMatch[0]) as Array<{
-			symbol: string;
-			name: string;
-		}>;
 		const existingSet = new Set(existingSymbols);
 
 		let added = 0;
 		for (const stock of discovered) {
-			const symbol = stock.symbol.toUpperCase().replace(".L", "");
-			if (existingSet.has(symbol)) continue;
+			if (existingSet.has(stock.symbol)) continue;
 
-			const exclusion = await isSymbolExcluded(symbol);
+			const exclusion = await isSymbolExcluded(stock.symbol);
 			if (exclusion.excluded) continue;
 
-			// Verify it exists on LSE via FMP
-			const profile = await getFMPProfile(symbol);
+			const profile = await getFMPProfile(stock.symbol, stock.exchange);
 			if (profile) {
-				await addToWatchlist(symbol, profile.companyName, profile.sector);
+				await addToWatchlist(stock.symbol, profile.companyName, profile.sector, stock.exchange);
 				added++;
 			}
 
-			if (added >= 3) break; // Max 3 news-driven additions per run
+			if (added >= 3) break;
 		}
 
 		log.info(
