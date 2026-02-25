@@ -3,7 +3,7 @@ import { getFMPQuotes } from "../research/sources/fmp.ts";
 import { getYahooQuote } from "../research/sources/yahoo-finance.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { getApi } from "./connection.ts";
-import { lseStock } from "./contracts.ts";
+import { type Exchange, getContract } from "./contracts.ts";
 
 const log = createChildLogger({ module: "broker-market-data" });
 
@@ -20,9 +20,9 @@ export interface Quote {
 }
 
 /** Fetch real-time quote from IBKR */
-function getIbkrQuote(symbol: string): Promise<Quote> {
+function getIbkrQuote(symbol: string, exchange: Exchange = "LSE"): Promise<Quote> {
 	const api = getApi();
-	const contract = lseStock(symbol);
+	const contract = getContract(symbol, exchange);
 
 	return new Promise((resolve, reject) => {
 		const timeout = setTimeout(() => {
@@ -58,9 +58,12 @@ function getIbkrQuote(symbol: string): Promise<Quote> {
 }
 
 /** Try Yahoo Finance as fallback quote source */
-async function getYahooFallbackQuote(symbol: string): Promise<Quote | null> {
+async function getYahooFallbackQuote(
+	symbol: string,
+	exchange: Exchange = "LSE",
+): Promise<Quote | null> {
 	try {
-		const yq = await getYahooQuote(symbol);
+		const yq = await getYahooQuote(symbol, exchange);
 		if (!yq || !yq.price) return null;
 		return {
 			symbol,
@@ -78,29 +81,28 @@ async function getYahooFallbackQuote(symbol: string): Promise<Quote | null> {
 	}
 }
 
-/** Get a market data snapshot for an LSE symbol.
- *  Priority: IBKR real-time → Yahoo Finance */
-export async function getQuote(symbol: string): Promise<Quote> {
+/** Get a market data snapshot. Priority: IBKR real-time → Yahoo Finance */
+export async function getQuote(symbol: string, exchange: Exchange = "LSE"): Promise<Quote> {
 	try {
-		return await getIbkrQuote(symbol);
+		return await getIbkrQuote(symbol, exchange);
 	} catch {
-		// IBKR failed (error 354 / timeout) — try Yahoo
-		const yahoo = await getYahooFallbackQuote(symbol);
+		const yahoo = await getYahooFallbackQuote(symbol, exchange);
 		if (yahoo) {
-			log.info({ symbol, last: yahoo.last }, "Yahoo fallback quote");
+			log.info({ symbol, exchange, last: yahoo.last }, "Yahoo fallback quote");
 			return yahoo;
 		}
 		throw new Error(`No quote available for ${symbol} (IBKR and Yahoo both failed)`);
 	}
 }
 
-/** Get quotes for multiple symbols */
+/** Get quotes for multiple symbols (all assumed same exchange unless using getQuotesMultiExchange) */
 export async function getQuotes(
 	symbols: string[],
-	options?: { skipFmpFallback?: boolean },
+	options?: { skipFmpFallback?: boolean; exchange?: Exchange },
 ): Promise<Map<string, Quote>> {
+	const exchange = options?.exchange ?? "LSE";
 	const quotes = new Map<string, Quote>();
-	const results = await Promise.allSettled(symbols.map((s) => getQuote(s)));
+	const results = await Promise.allSettled(symbols.map((s) => getQuote(s, exchange)));
 
 	const failedSymbols: string[] = [];
 	for (let i = 0; i < symbols.length; i++) {
@@ -113,10 +115,9 @@ export async function getQuotes(
 		}
 	}
 
-	// FMP as final fallback when both IBKR and Yahoo fail
 	if (failedSymbols.length > 0 && !options?.skipFmpFallback) {
 		try {
-			const fmpQuotes = await getFMPQuotes(failedSymbols);
+			const fmpQuotes = await getFMPQuotes(failedSymbols, exchange);
 			for (const [symbol, quote] of fmpQuotes) {
 				quotes.set(symbol, quote);
 				log.info({ symbol, last: quote.last }, "FMP fallback quote");
@@ -138,14 +139,15 @@ export interface HistoricalBar {
 	volume: number;
 }
 
-/** Get historical daily bars for an LSE symbol */
+/** Get historical daily bars */
 export async function getHistoricalBars(
 	symbol: string,
 	duration: string = "1 M",
 	barSize: BarSizeSetting = BarSizeSetting.DAYS_ONE,
+	exchange: Exchange = "LSE",
 ): Promise<HistoricalBar[]> {
 	const api = getApi();
-	const contract = lseStock(symbol);
+	const contract = getContract(symbol, exchange);
 
 	const bars = await api.getHistoricalData(contract, "", duration, barSize, "TRADES", 1, 1);
 

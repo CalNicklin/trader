@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
 import { computeIndicators } from "../analysis/indicators.ts";
+import type { Exchange } from "../broker/contracts.ts";
 import { getHistoricalBars } from "../broker/market-data.ts";
 import { getConfig } from "../config.ts";
 import { getDb } from "../db/client.ts";
@@ -13,6 +14,7 @@ import { logPipelineEvent } from "./pipeline-logger.ts";
 import { getFMPProfile } from "./sources/fmp.ts";
 import { createFMPScreenerDeps, screenLSEStocks } from "./sources/lse-screener.ts";
 import { fetchNews, filterNewsForSymbols, type NewsItem } from "./sources/news-scraper.ts";
+import { createUSScreenerDeps, screenUSStocks } from "./sources/us-screener.ts";
 import { getYahooFundamentals, getYahooQuote } from "./sources/yahoo-finance.ts";
 import { addToWatchlist, getActiveWatchlist, getStaleSymbols, updateScore } from "./watchlist.ts";
 
@@ -73,8 +75,13 @@ export async function runResearchPipeline(): Promise<void> {
 	}
 }
 
-/** Discover new stocks to add to the watchlist via FMP screener */
+/** Discover new stocks to add to the watchlist — both LSE and US. */
 async function discoverNewStocks(): Promise<void> {
+	await discoverLSEStocks();
+	await discoverUSStocks();
+}
+
+async function discoverLSEStocks(): Promise<void> {
 	try {
 		const deps = await createFMPScreenerDeps();
 		const candidates = await screenLSEStocks(deps);
@@ -85,27 +92,63 @@ async function discoverNewStocks(): Promise<void> {
 		for (const candidate of candidates) {
 			if (currentSymbols.has(candidate.symbol)) continue;
 
-			// Check exclusions
 			const exclusion = await isSymbolExcluded(candidate.symbol);
 			if (exclusion.excluded) continue;
 
-			await addToWatchlist(candidate.symbol, candidate.name, candidate.sector);
+			await addToWatchlist(candidate.symbol, candidate.name, candidate.sector, "LSE");
 			added++;
 
-			if (added >= 5) break; // Max 5 new additions per session
+			if (added >= 5) break;
 		}
 
-		log.info({ candidates: candidates.length, added }, "Stock discovery complete");
+		log.info({ candidates: candidates.length, added, exchange: "LSE" }, "LSE discovery complete");
 		await logPipelineEvent(getDb(), {
 			phase: "discovery",
-			message: "Stock discovery complete",
+			message: "LSE discovery complete",
 			data: { candidates: candidates.length, added, watchlistSize: currentWatchlist.length },
 		});
 	} catch (error) {
-		log.error({ error }, "Stock discovery failed");
+		log.error({ error }, "LSE stock discovery failed");
 		await logPipelineEvent(getDb(), {
 			phase: "discovery",
-			message: "Stock discovery failed",
+			message: "LSE stock discovery failed",
+			level: "ERROR",
+			data: { error: String(error) },
+		}).catch(() => {});
+	}
+}
+
+async function discoverUSStocks(): Promise<void> {
+	try {
+		const deps = await createUSScreenerDeps();
+		const candidates = await screenUSStocks(deps);
+		const currentWatchlist = await getActiveWatchlist();
+		const currentSymbols = new Set(currentWatchlist.map((w) => w.symbol));
+
+		let added = 0;
+		for (const candidate of candidates) {
+			if (currentSymbols.has(candidate.symbol)) continue;
+
+			const exclusion = await isSymbolExcluded(candidate.symbol);
+			if (exclusion.excluded) continue;
+
+			await addToWatchlist(candidate.symbol, candidate.name, candidate.sector, candidate.exchange);
+			added++;
+
+			if (added >= 5) break;
+		}
+
+		log.info({ candidates: candidates.length, added, exchange: "US" }, "US discovery complete");
+		await logPipelineEvent(getDb(), {
+			phase: "discovery",
+			message: "US discovery complete",
+			data: { candidates: candidates.length, added },
+		});
+	} catch (error) {
+		log.error({ error }, "US stock discovery failed");
+		await logPipelineEvent(getDb(), {
+			phase: "discovery",
+			message: "US stock discovery failed",
 			level: "ERROR",
 			data: { error: String(error) },
 		}).catch(() => {});
@@ -146,7 +189,10 @@ async function discoverFromNews(
 			messages: [
 				{
 					role: "user",
-					content: `Extract LSE-listed UK company tickers from these financial headlines. Only include companies clearly mentioned by name. Return a JSON array of objects with "symbol" (LSE ticker without .L suffix) and "name" (company name). Return [] if none found.
+					content: `Extract stock tickers mentioned in these financial headlines. Only include companies clearly mentioned by name.
+For UK companies, return the LSE ticker (without .L suffix), exchange "LSE".
+For US companies, return the NASDAQ or NYSE ticker, exchange "NASDAQ" or "NYSE".
+Return a JSON array of objects with "symbol", "name", and "exchange". Return [] if none found.
 
 Headlines:
 ${headlines}`,
@@ -222,19 +268,20 @@ ${headlines}`,
 export async function researchSymbol(
 	symbol: string,
 	newsItems: Array<{ title: string; snippet: string }>,
+	exchange: Exchange = "LSE",
 ): Promise<void> {
-	log.info({ symbol }, "Researching symbol");
+	log.info({ symbol, exchange }, "Researching symbol");
 
-	// Gather data from multiple sources
+	// Gather data from multiple sources (exchange-aware)
 	const [quote, fundamentals] = await Promise.all([
-		getYahooQuote(symbol),
-		getYahooFundamentals(symbol),
+		getYahooQuote(symbol, exchange),
+		getYahooFundamentals(symbol, exchange),
 	]);
 
 	// Fetch 1Y bars for full indicators + 52w range (pipeline has time budget for this)
 	let historicalBars = null;
 	try {
-		historicalBars = await getHistoricalBars(symbol, "1 Y");
+		historicalBars = await getHistoricalBars(symbol, "1 Y", undefined, exchange);
 	} catch {
 		log.debug({ symbol }, "Historical bars not available (IBKR might be disconnected)");
 	}

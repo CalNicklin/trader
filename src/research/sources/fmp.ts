@@ -1,3 +1,4 @@
+import type { Exchange } from "../../broker/contracts.ts";
 import type { Quote } from "../../broker/market-data.ts";
 import { getConfig } from "../../config.ts";
 import { createChildLogger } from "../../utils/logger.ts";
@@ -54,20 +55,36 @@ export interface FMPProfile {
 	lastDividend: number;
 }
 
+/** LSE symbols need .L suffix; US symbols are bare in FMP. */
+export function toFmpSymbol(symbol: string, exchange: Exchange): string {
+	if (exchange === "LSE") return `${symbol}.L`;
+	return symbol;
+}
+
 /** Get company profile from FMP */
-export async function getFMPProfile(symbol: string): Promise<FMPProfile | null> {
-	const result = await fmpFetch<FMPProfile[]>("/profile", { symbol: `${symbol}.L` });
+export async function getFMPProfile(
+	symbol: string,
+	exchange: Exchange = "LSE",
+): Promise<FMPProfile | null> {
+	const result = await fmpFetch<FMPProfile[]>("/profile", {
+		symbol: toFmpSymbol(symbol, exchange),
+	});
 	return result?.[0] ?? null;
 }
 
-/** Get real-time quotes from FMP for multiple LSE symbols via /profile endpoint */
-export async function getFMPQuotes(symbols: string[]): Promise<Map<string, Quote>> {
+/** Get real-time quotes from FMP for multiple symbols via /profile endpoint */
+export async function getFMPQuotes(
+	symbols: string[],
+	exchange: Exchange = "LSE",
+): Promise<Map<string, Quote>> {
 	const quotes = new Map<string, Quote>();
 	if (symbols.length === 0) return quotes;
 
 	const results = await Promise.all(
 		symbols.map(async (symbol) => {
-			const profile = await fmpFetch<FMPProfile[]>("/profile", { symbol: `${symbol}.L` });
+			const profile = await fmpFetch<FMPProfile[]>("/profile", {
+				symbol: toFmpSymbol(symbol, exchange),
+			});
 			return { symbol, profile: profile?.[0] ?? null };
 		}),
 	);

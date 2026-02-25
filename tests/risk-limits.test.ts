@@ -4,7 +4,7 @@ import { calculateStopLoss } from "../src/risk/manager.ts";
 
 test("hard limits are correctly defined", () => {
 	expect(HARD_LIMITS.MAX_POSITION_PCT).toBe(15);
-	expect(HARD_LIMITS.MAX_POSITION_GBP).toBe(50_000);
+	expect(HARD_LIMITS.MAX_POSITION_VALUE).toBe(50_000);
 	expect(HARD_LIMITS.MIN_CASH_RESERVE_PCT).toBe(10);
 	expect(HARD_LIMITS.PER_TRADE_STOP_LOSS_PCT).toBe(3);
 	expect(HARD_LIMITS.DAILY_LOSS_LIMIT_PCT).toBe(2);
@@ -13,6 +13,14 @@ test("hard limits are correctly defined", () => {
 	expect(HARD_LIMITS.MAX_TRADES_PER_DAY).toBe(10);
 	expect(HARD_LIMITS.ISA_NO_SHORTING).toBe(true);
 	expect(HARD_LIMITS.ISA_NO_MARGIN).toBe(true);
+	expect(HARD_LIMITS.ISA_ALLOWED_EXCHANGES).toContain("LSE");
+	expect(HARD_LIMITS.ISA_ALLOWED_EXCHANGES).toContain("NASDAQ");
+	expect(HARD_LIMITS.ISA_ALLOWED_EXCHANGES).toContain("NYSE");
+	expect(HARD_LIMITS.MIN_PRICE.GBP).toBe(0.1);
+	expect(HARD_LIMITS.MIN_PRICE.USD).toBe(1.0);
+	expect(HARD_LIMITS.STAMP_DUTY.LSE).toBe(0.005);
+	expect(HARD_LIMITS.STAMP_DUTY.NASDAQ).toBe(0);
+	expect(HARD_LIMITS.STAMP_DUTY.NYSE).toBe(0);
 });
 
 test("stop loss calculation falls back to 3% without ATR", () => {

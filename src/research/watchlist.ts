@@ -1,4 +1,5 @@
 import { desc, eq } from "drizzle-orm";
+import type { Exchange } from "../broker/contracts.ts";
 import { getDb } from "../db/client.ts";
 import { positions, research, watchlist } from "../db/schema.ts";
 import { createChildLogger } from "../utils/logger.ts";
@@ -41,13 +42,14 @@ export async function addToWatchlist(
 	symbol: string,
 	name?: string,
 	sector?: string,
+	exchange: Exchange = "LSE",
 ): Promise<void> {
 	const db = getDb();
 	await db
 		.insert(watchlist)
-		.values({ symbol: symbol.toUpperCase(), name, sector })
+		.values({ symbol: symbol.toUpperCase(), name, sector, exchange })
 		.onConflictDoNothing();
-	log.info({ symbol }, "Added to watchlist");
+	log.info({ symbol, exchange }, "Added to watchlist");
 }
 
 /** Remove a symbol from the watchlist */

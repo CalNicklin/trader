@@ -540,18 +540,21 @@ async function onPostMarket(): Promise<void> {
 	}
 }
 
-/** Reconcile positions with IBKR */
+/** Reconcile positions with IBKR — matches on (symbol, exchange) */
 async function reconcilePositions(): Promise<void> {
 	const db = getDb();
 	const brokerPositions = await getBrokerPositions();
 
 	// Get current DB positions
 	const dbPositions = await db.select().from(positions);
-	const dbSymbols = new Set(dbPositions.map((p) => p.symbol));
+	const dbKey = (symbol: string, exchange: string) => `${symbol}:${exchange}`;
+	const dbMap = new Map(dbPositions.map((p) => [dbKey(p.symbol, p.exchange), p]));
 
 	// Add/update broker positions
 	for (const bp of brokerPositions) {
-		if (dbSymbols.has(bp.symbol)) {
+		const key = dbKey(bp.symbol, bp.exchange);
+		const existing = dbMap.get(key);
+		if (existing) {
 			await db
 				.update(positions)
 				.set({
@@ -559,10 +562,12 @@ async function reconcilePositions(): Promise<void> {
 					avgCost: bp.avgCost,
 					updatedAt: new Date().toISOString(),
 				})
-				.where(eq(positions.symbol, bp.symbol));
+				.where(eq(positions.id, existing.id));
 		} else {
 			await db.insert(positions).values({
 				symbol: bp.symbol,
+				exchange: bp.exchange,
+				currency: bp.currency,
 				quantity: bp.quantity,
 				avgCost: bp.avgCost,
 			});
@@ -570,9 +575,9 @@ async function reconcilePositions(): Promise<void> {
 	}
 
 	// Remove positions no longer in broker
-	const brokerSymbols = new Set(brokerPositions.map((p) => p.symbol));
+	const brokerKeys = new Set(brokerPositions.map((p) => dbKey(p.symbol, p.exchange)));
 	for (const dbPos of dbPositions) {
-		if (!brokerSymbols.has(dbPos.symbol)) {
+		if (!brokerKeys.has(dbKey(dbPos.symbol, dbPos.exchange))) {
 			await db.delete(positions).where(eq(positions.id, dbPos.id));
 		}
 	}

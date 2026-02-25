@@ -4,13 +4,14 @@ import { getDb } from "../db/client.ts";
 import { trades } from "../db/schema.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { getApi } from "./connection.ts";
-import { lseStock } from "./contracts.ts";
+import { type Exchange, getContract } from "./contracts.ts";
 import { trackOrder } from "./order-monitor.ts";
 
 const log = createChildLogger({ module: "broker-orders" });
 
 export interface TradeRequest {
 	symbol: string;
+	exchange?: Exchange;
 	side: "BUY" | "SELL";
 	quantity: number;
 	orderType: "LIMIT" | "MARKET";
@@ -29,12 +30,14 @@ export interface TradeResult {
 export async function placeTrade(req: TradeRequest): Promise<TradeResult> {
 	const db = getDb();
 	const api = getApi();
-	const contract = lseStock(req.symbol);
+	const exchange = req.exchange ?? "LSE";
+	const contract = getContract(req.symbol, exchange);
 
 	const [tradeRecord] = await db
 		.insert(trades)
 		.values({
 			symbol: req.symbol,
+			exchange,
 			side: req.side,
 			quantity: req.quantity,
 			orderType: req.orderType,

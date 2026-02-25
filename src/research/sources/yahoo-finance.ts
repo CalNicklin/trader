@@ -1,9 +1,16 @@
 import YahooFinance from "yahoo-finance2";
+import type { Exchange } from "../../broker/contracts.ts";
 import { createChildLogger } from "../../utils/logger.ts";
 
 const log = createChildLogger({ module: "research-yahoo" });
 
 const yf = new YahooFinance();
+
+/** LSE symbols need .L suffix; US symbols are bare in Yahoo Finance. */
+export function toYahooSymbol(symbol: string, exchange: Exchange): string {
+	if (exchange === "LSE") return symbol.endsWith(".L") ? symbol : `${symbol}.L`;
+	return symbol;
+}
 
 export interface YahooQuoteData {
 	symbol: string;
@@ -24,11 +31,13 @@ export interface YahooQuoteData {
 	dayLow: number | null;
 }
 
-/** Get quote data from Yahoo Finance for a UK stock */
-export async function getYahooQuote(symbol: string): Promise<YahooQuoteData | null> {
+/** Get quote data from Yahoo Finance */
+export async function getYahooQuote(
+	symbol: string,
+	exchange: Exchange = "LSE",
+): Promise<YahooQuoteData | null> {
 	try {
-		// LSE stocks use .L suffix in Yahoo
-		const yahooSymbol = symbol.endsWith(".L") ? symbol : `${symbol}.L`;
+		const yahooSymbol = toYahooSymbol(symbol, exchange);
 		const quote = await yf.quote(yahooSymbol);
 
 		if (!quote) return null;
@@ -79,9 +88,12 @@ export interface YahooFundamentals {
 }
 
 /** Get fundamental data from Yahoo Finance */
-export async function getYahooFundamentals(symbol: string): Promise<YahooFundamentals | null> {
+export async function getYahooFundamentals(
+	symbol: string,
+	exchange: Exchange = "LSE",
+): Promise<YahooFundamentals | null> {
 	try {
-		const yahooSymbol = symbol.endsWith(".L") ? symbol : `${symbol}.L`;
+		const yahooSymbol = toYahooSymbol(symbol, exchange);
 		const result = await yf.quoteSummary(yahooSymbol, {
 			modules: [
 				"financialData",

@@ -1,8 +1,9 @@
-import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text, unique, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const trades = sqliteTable("trades", {
 	id: integer("id").primaryKey({ autoIncrement: true }),
 	symbol: text("symbol").notNull(),
+	exchange: text("exchange").notNull().default("LSE"),
 	side: text("side", { enum: ["BUY", "SELL"] }).notNull(),
 	quantity: integer("quantity").notNull(),
 	orderType: text("order_type", { enum: ["LIMIT", "MARKET"] }).notNull(),
@@ -27,22 +28,33 @@ export const trades = sqliteTable("trades", {
 	filledAt: text("filled_at"),
 });
 
-export const positions = sqliteTable("positions", {
-	id: integer("id").primaryKey({ autoIncrement: true }),
-	symbol: text("symbol").notNull().unique(),
-	quantity: integer("quantity").notNull(),
-	avgCost: real("avg_cost").notNull(),
-	currentPrice: real("current_price"),
-	unrealizedPnl: real("unrealized_pnl"),
-	marketValue: real("market_value"),
-	stopLossPrice: real("stop_loss_price"),
-	targetPrice: real("target_price"),
-	highWaterMark: real("high_water_mark"),
-	trailingStopPrice: real("trailing_stop_price"),
-	updatedAt: text("updated_at")
-		.notNull()
-		.$defaultFn(() => new Date().toISOString()),
-});
+export const positions = sqliteTable(
+	"positions",
+	{
+		id: integer("id").primaryKey({ autoIncrement: true }),
+		symbol: text("symbol").notNull(),
+		exchange: text("exchange").notNull().default("LSE"),
+		currency: text("currency").notNull().default("GBP"),
+		quantity: integer("quantity").notNull(),
+		avgCost: real("avg_cost").notNull(),
+		currentPrice: real("current_price"),
+		unrealizedPnl: real("unrealized_pnl"),
+		marketValue: real("market_value"),
+		stopLossPrice: real("stop_loss_price"),
+		targetPrice: real("target_price"),
+		highWaterMark: real("high_water_mark"),
+		trailingStopPrice: real("trailing_stop_price"),
+		updatedAt: text("updated_at")
+			.notNull()
+			.$defaultFn(() => new Date().toISOString()),
+	},
+	(table) => ({
+		symbolExchangeUnique: unique("positions_symbol_exchange_unique").on(
+			table.symbol,
+			table.exchange,
+		),
+	}),
+);
 
 export const research = sqliteTable("research", {
 	id: integer("id").primaryKey({ autoIncrement: true }),
@@ -60,20 +72,30 @@ export const research = sqliteTable("research", {
 		.$defaultFn(() => new Date().toISOString()),
 });
 
-export const watchlist = sqliteTable("watchlist", {
-	id: integer("id").primaryKey({ autoIncrement: true }),
-	symbol: text("symbol").notNull().unique(),
-	name: text("name"),
-	sector: text("sector"),
-	score: real("score").default(0),
-	lastResearchedAt: text("last_researched_at"),
-	addedAt: text("added_at")
-		.notNull()
-		.$defaultFn(() => new Date().toISOString()),
-	active: integer("active", { mode: "boolean" }).notNull().default(true),
-	high52w: real("high_52w"),
-	low52w: real("low_52w"),
-});
+export const watchlist = sqliteTable(
+	"watchlist",
+	{
+		id: integer("id").primaryKey({ autoIncrement: true }),
+		symbol: text("symbol").notNull(),
+		exchange: text("exchange").notNull().default("LSE"),
+		name: text("name"),
+		sector: text("sector"),
+		score: real("score").default(0),
+		lastResearchedAt: text("last_researched_at"),
+		addedAt: text("added_at")
+			.notNull()
+			.$defaultFn(() => new Date().toISOString()),
+		active: integer("active", { mode: "boolean" }).notNull().default(true),
+		high52w: real("high_52w"),
+		low52w: real("low_52w"),
+	},
+	(table) => ({
+		symbolExchangeUnique: unique("watchlist_symbol_exchange_unique").on(
+			table.symbol,
+			table.exchange,
+		),
+	}),
+);
 
 export const dailySnapshots = sqliteTable("daily_snapshots", {
 	id: integer("id").primaryKey({ autoIncrement: true }),

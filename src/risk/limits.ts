@@ -1,16 +1,18 @@
+import type { Exchange } from "../broker/contracts.ts";
+
 /** Hardcoded safety limits that cannot be overridden by the agent */
 export const HARD_LIMITS = {
-	/** ISA rules - no shorting, no margin, GBP/LSE only */
+	/** ISA rules - no shorting, no margin */
 	ISA_CASH_ONLY: true,
 	ISA_NO_SHORTING: true,
 	ISA_NO_MARGIN: true,
-	ISA_GBP_ONLY: true,
-	ISA_LSE_ONLY: true,
+	ISA_ALLOWED_EXCHANGES: ["LSE", "NASDAQ", "NYSE"] as readonly Exchange[],
+	ISA_ALLOWED_CURRENCIES: ["GBP", "USD"] as readonly string[],
 
 	/** Maximum single position as % of portfolio */
 	MAX_POSITION_PCT: 15,
-	/** Hard cap on single position in GBP */
-	MAX_POSITION_GBP: 50_000,
+	/** Hard cap on single position in GBP equivalent */
+	MAX_POSITION_VALUE: 50_000,
 	/** Minimum cash reserve as % of portfolio */
 	MIN_CASH_RESERVE_PCT: 10,
 
@@ -38,10 +40,12 @@ export const HARD_LIMITS = {
 	/** Maximum sector exposure % */
 	MAX_SECTOR_EXPOSURE_PCT: 30,
 
-	/** Minimum stock price (GBP) - no penny stocks */
-	MIN_PRICE_GBP: 0.1,
+	/** Minimum stock price by currency — no penny stocks */
+	MIN_PRICE: { GBP: 0.1, USD: 1.0 } as Readonly<Record<string, number>>,
 	/** Minimum average daily volume */
 	MIN_AVG_VOLUME: 50000,
+	/** Stamp duty rate by exchange (0.5% for LSE main market, 0% for US) */
+	STAMP_DUTY: { LSE: 0.005, NASDAQ: 0, NYSE: 0 } as Readonly<Record<Exchange, number>>,
 
 	/** Win rate threshold for auto-pause */
 	PAUSE_WIN_RATE_THRESHOLD: 0.4,
@@ -73,4 +77,11 @@ export function getActiveLimits(mode: TradingMode): ActiveLimits {
 
 export function getTradeIntervalMin(mode: TradingMode): number {
 	return mode === "paper" ? PAPER_TRADE_INTERVAL_MIN : HARD_LIMITS.MIN_TRADE_INTERVAL_MIN;
+}
+
+/** Get stamp duty rate for an exchange. 0.5% for LSE main market, 0% for US. */
+export function getStampDuty(exchange: Exchange, _isAIM?: boolean): number {
+	if (exchange !== "LSE") return 0;
+	if (_isAIM) return 0;
+	return HARD_LIMITS.STAMP_DUTY[exchange];
 }

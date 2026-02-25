@@ -73,6 +73,8 @@ export async function getAccountSummary(): Promise<AccountSummary> {
 export interface Position {
 	accountId: string;
 	symbol: string;
+	exchange: string;
+	currency: string;
 	quantity: number;
 	avgCost: number;
 }
@@ -97,6 +99,8 @@ export async function getPositions(): Promise<Position[]> {
 							positions.push({
 								accountId,
 								symbol: pos.contract.symbol ?? "UNKNOWN",
+								exchange: pos.contract.primaryExch ?? "LSE",
+								currency: pos.contract.currency ?? "GBP",
 								quantity: pos.pos ?? 0,
 								avgCost: pos.avgCost ?? 0,
 							});

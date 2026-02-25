@@ -1,6 +1,7 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getTradingMode } from "../agent/prompts/trading-mode.ts";
 import { getAccountSummary } from "../broker/account.ts";
+import type { Exchange } from "../broker/contracts.ts";
 import { getDb } from "../db/client.ts";
 import { dailySnapshots, positions, trades, watchlist } from "../db/schema.ts";
 import { getYahooQuote } from "../research/sources/yahoo-finance.ts";
@@ -17,6 +18,7 @@ export interface RiskCheckResult {
 
 export interface TradeProposal {
 	symbol: string;
+	exchange?: Exchange;
 	side: "BUY" | "SELL";
 	quantity: number;
 	estimatedPrice: number;
@@ -32,6 +34,16 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 		return { approved: true, reasons: [] };
 	}
 
+	const exchange = proposal.exchange ?? "LSE";
+	const currency = exchange === "LSE" ? "GBP" : "USD";
+
+	// --- Exchange allowed check ---
+	if (!HARD_LIMITS.ISA_ALLOWED_EXCHANGES.includes(exchange)) {
+		reasons.push(
+			`Exchange ${exchange} not in allowed list: ${HARD_LIMITS.ISA_ALLOWED_EXCHANGES.join(", ")}`,
+		);
+	}
+
 	// --- Exclusion checks ---
 	const symbolCheck = await isSymbolExcluded(proposal.symbol);
 	if (symbolCheck.excluded) {
@@ -45,10 +57,12 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 		}
 	}
 
-	// --- Price check ---
-	if (proposal.estimatedPrice < HARD_LIMITS.MIN_PRICE_GBP) {
+	// --- Price check (currency-aware) ---
+	const minPrice = HARD_LIMITS.MIN_PRICE[currency] ?? 0.1;
+	if (proposal.estimatedPrice < minPrice) {
+		const sym = currency === "GBP" ? "£" : "$";
 		reasons.push(
-			`Price £${proposal.estimatedPrice} below minimum £${HARD_LIMITS.MIN_PRICE_GBP} (penny stock)`,
+			`Price ${sym}${proposal.estimatedPrice} below minimum ${sym}${minPrice} (penny stock)`,
 		);
 	}
 
@@ -64,9 +78,11 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 		reasons.push(`Position ${positionPct.toFixed(1)}% exceeds max ${limits.MAX_POSITION_PCT}%`);
 	}
 
-	// Hard GBP cap
-	if (tradeValue > limits.MAX_POSITION_GBP) {
-		reasons.push(`Position £${tradeValue.toFixed(0)} exceeds hard cap £${limits.MAX_POSITION_GBP}`);
+	// Hard cap (GBP equivalent)
+	if (tradeValue > limits.MAX_POSITION_VALUE) {
+		reasons.push(
+			`Position value ${tradeValue.toFixed(0)} exceeds hard cap ${limits.MAX_POSITION_VALUE}`,
+		);
 	}
 
 	// Cash reserve check
@@ -120,7 +136,7 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 	}
 
 	// --- Volume check (fresh Yahoo data) ---
-	const yahooQuote = await getYahooQuote(proposal.symbol);
+	const yahooQuote = await getYahooQuote(proposal.symbol, exchange);
 	if (!yahooQuote) {
 		reasons.push("Unable to verify volume — Yahoo Finance quote unavailable");
 	} else if (yahooQuote.avgVolume < HARD_LIMITS.MIN_AVG_VOLUME) {
@@ -263,12 +279,12 @@ export async function getMaxPositionSize(
 	const account = await getAccountSummary();
 
 	const pctLimit = (account.netLiquidation * limits.MAX_POSITION_PCT) / 100;
-	const gbpLimit = limits.MAX_POSITION_GBP;
+	const valueLimit = limits.MAX_POSITION_VALUE;
 
 	const availableCash =
 		account.totalCashValue - (account.netLiquidation * limits.MIN_CASH_RESERVE_PCT) / 100;
 
-	const maxValue = Math.min(pctLimit, gbpLimit, Math.max(0, availableCash));
+	const maxValue = Math.min(pctLimit, valueLimit, Math.max(0, availableCash));
 	const maxQuantity = Math.floor(maxValue / price);
 
 	return { maxQuantity, maxValue };
@@ -298,11 +314,11 @@ export async function getAtrPositionSize(price: number, atr: number): Promise<At
 	const atrBasedValue = atrBasedQuantity * price;
 
 	const pctLimit = (account.netLiquidation * limits.MAX_POSITION_PCT) / 100;
-	const gbpLimit = limits.MAX_POSITION_GBP;
+	const valueLimit = limits.MAX_POSITION_VALUE;
 	const availableCash =
 		account.totalCashValue - (account.netLiquidation * limits.MIN_CASH_RESERVE_PCT) / 100;
 
-	const maxValue = Math.min(atrBasedValue, pctLimit, gbpLimit, Math.max(0, availableCash));
+	const maxValue = Math.min(atrBasedValue, pctLimit, valueLimit, Math.max(0, availableCash));
 	const maxQuantity = Math.floor(maxValue / price);
 
 	const stopLossPrice = price - riskPerShare;
