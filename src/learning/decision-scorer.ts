@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { and, eq, like } from "drizzle-orm";
+import type { Exchange } from "../broker/contracts.ts";
 import { getHistoricalBars } from "../broker/market-data.ts";
 import { getConfig } from "../config.ts";
 import { getDb } from "../db/client.ts";
@@ -16,8 +17,9 @@ type DecisionScoreValue =
 	| "missed_opportunity"
 	| "unclear";
 
-interface DecisionExtract {
+export interface DecisionExtract {
 	symbol: string;
+	exchange: Exchange;
 	statedAction: "BUY" | "SELL" | "HOLD" | "WATCH" | "PASS";
 	reason: string;
 }
@@ -28,7 +30,7 @@ interface MissedOppAssessment {
 	tags: string[];
 }
 
-const EXTRACT_DECISIONS_PROMPT = `Extract stock-level decisions from this trading agent log entry. For each stock mentioned, identify:
+export const EXTRACT_DECISIONS_PROMPT = `Extract stock-level decisions from this trading agent log entry. For each stock mentioned, identify:
 - symbol: the stock ticker (e.g. SHEL, AZN, AAPL, MSFT)
 - exchange: the exchange (LSE, NASDAQ, or NYSE)
 - statedAction: what the agent decided (BUY, SELL, HOLD, WATCH, or PASS if explicitly rejected)
@@ -36,6 +38,22 @@ const EXTRACT_DECISIONS_PROMPT = `Extract stock-level decisions from this tradin
 
 If the log says "NO TRADES" or similar with no specific stocks mentioned, return an empty array.
 Return JSON only: { "symbols": [...] }`;
+
+/** Parse the LLM extraction JSON into typed DecisionExtract objects. */
+export function parseDecisionExtracts(text: string): DecisionExtract[] {
+	const match = text.match(/\{[\s\S]*\}/);
+	if (!match) return [];
+
+	const parsed = JSON.parse(match[0]) as { symbols?: Array<Record<string, unknown>> };
+	if (!Array.isArray(parsed.symbols)) return [];
+
+	return parsed.symbols.map((s) => ({
+		symbol: String(s.symbol ?? ""),
+		exchange: (s.exchange as Exchange) ?? "LSE",
+		statedAction: s.statedAction as DecisionExtract["statedAction"],
+		reason: String(s.reason ?? ""),
+	}));
+}
 
 export function scoreDecision(statedAction: string, changePct: number): DecisionScoreValue {
 	if (statedAction === "HOLD") {
@@ -148,15 +166,9 @@ export async function runDecisionScorer(): Promise<void> {
 		.map((b) => b.text)
 		.join("");
 
-	const extractMatch = extractText.match(/\{[\s\S]*\}/);
-	if (!extractMatch) {
-		log.warn("No JSON in decision extraction response");
-		return;
-	}
-
-	const extracted = JSON.parse(extractMatch[0]) as { symbols: DecisionExtract[] };
 	const scorableActions = new Set(["HOLD", "WATCH", "PASS"]);
-	const scorable = extracted.symbols.filter((s) => scorableActions.has(s.statedAction));
+	const allExtracts = parseDecisionExtracts(extractText);
+	const scorable = allExtracts.filter((s) => scorableActions.has(s.statedAction));
 
 	if (scorable.length === 0) {
 		log.info("No HOLD/WATCH/PASS decisions to score");
@@ -199,15 +211,17 @@ export async function runDecisionScorer(): Promise<void> {
 
 	// Get closing prices — use last bar from historical data
 	const closingPrices = new Map<string, number>();
-	const uniqueSymbols = [...new Set(scorable.map((s) => s.symbol))];
-	for (const symbol of uniqueSymbols) {
+	const symbolExchangeMap = new Map<string, Exchange>();
+	for (const s of scorable) symbolExchangeMap.set(s.symbol, s.exchange);
+
+	for (const [symbol, exchange] of symbolExchangeMap) {
 		try {
-			const bars = await getHistoricalBars(symbol, "1 M");
+			const bars = await getHistoricalBars(symbol, "1 M", undefined, exchange);
 			if (bars.length > 0) {
 				closingPrices.set(symbol, bars[bars.length - 1]!.close);
 			}
 		} catch (e) {
-			log.warn({ symbol, error: e }, "Failed to get closing price for scoring");
+			log.warn({ symbol, exchange, error: e }, "Failed to get closing price for scoring");
 		}
 	}
 
