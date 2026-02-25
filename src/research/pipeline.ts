@@ -44,14 +44,13 @@ export async function runResearchPipeline(): Promise<void> {
 		const staleSymbols = await getStaleSymbols();
 		const toResearch = staleSymbols.slice(0, 10); // Max 10 per session
 
-		for (const symbol of toResearch) {
+		for (const { symbol, exchange } of toResearch) {
 			try {
-				await researchSymbol(symbol, symbolNews.get(symbol) ?? []);
+				await researchSymbol(symbol, symbolNews.get(symbol) ?? [], exchange);
 				await updateScore(symbol);
-				// Brief pause between analyses
 				await Bun.sleep(2000);
 			} catch (error) {
-				log.error({ symbol, error }, "Research failed for symbol");
+				log.error({ symbol, exchange, error }, "Research failed for symbol");
 			}
 		}
 

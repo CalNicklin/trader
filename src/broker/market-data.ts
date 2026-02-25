@@ -130,6 +130,33 @@ export async function getQuotes(
 	return quotes;
 }
 
+type GetQuotesFn = (
+	symbols: string[],
+	options?: { skipFmpFallback?: boolean; exchange?: Exchange },
+) => Promise<Map<string, Quote>>;
+
+/** Fetch quotes for symbols spanning multiple exchanges. Groups by exchange, calls fetcher per group, merges. */
+export async function getQuotesGroupedByExchange(
+	items: ReadonlyArray<{ symbol: string; exchange: Exchange }>,
+	fetcher: GetQuotesFn = getQuotes,
+): Promise<Map<string, Quote>> {
+	const byExchange = new Map<Exchange, string[]>();
+	for (const item of items) {
+		const list = byExchange.get(item.exchange) ?? [];
+		list.push(item.symbol);
+		byExchange.set(item.exchange, list);
+	}
+
+	const merged = new Map<string, Quote>();
+	for (const [exchange, symbols] of byExchange) {
+		const quotes = await fetcher(symbols, { exchange });
+		for (const [symbol, quote] of quotes) {
+			merged.set(symbol, quote);
+		}
+	}
+	return merged;
+}
+
 export interface HistoricalBar {
 	time: string;
 	open: number;

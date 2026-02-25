@@ -158,13 +158,19 @@ export async function decayScores(): Promise<void> {
 	}
 }
 
-/** Get symbols that need research (not researched in 24h), prioritized */
-export async function getStaleSymbols(): Promise<string[]> {
+export interface StaleSymbol {
+	symbol: string;
+	exchange: Exchange;
+}
+
+/** Get symbols that need research (not researched in 24h), prioritized. Includes exchange for caller propagation. */
+export async function getStaleSymbols(): Promise<StaleSymbol[]> {
 	const db = getDb();
 
 	const items = await db
 		.select({
 			symbol: watchlist.symbol,
+			exchange: watchlist.exchange,
 			score: watchlist.score,
 			lastResearchedAt: watchlist.lastResearchedAt,
 		})
@@ -174,7 +180,6 @@ export async function getStaleSymbols(): Promise<string[]> {
 	const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 	const stale = items.filter((i) => !i.lastResearchedAt || i.lastResearchedAt < oneDayAgo);
 
-	// Prioritize: held positions first, then by score desc, then stalest first
 	const heldPositions = await db.select({ symbol: positions.symbol }).from(positions);
 	const heldSet = new Set(heldPositions.map((p) => p.symbol));
 
@@ -186,5 +191,5 @@ export async function getStaleSymbols(): Promise<string[]> {
 		return (a.lastResearchedAt ?? "").localeCompare(b.lastResearchedAt ?? "");
 	});
 
-	return stale.map((i) => i.symbol);
+	return stale.map((i) => ({ symbol: i.symbol, exchange: i.exchange as Exchange }));
 }

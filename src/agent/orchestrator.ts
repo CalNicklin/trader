@@ -4,7 +4,7 @@ import { evaluateGate, loadGateConfig } from "../analysis/momentum-gate.ts";
 import { getAccountSummary, getPositions as getBrokerPositions } from "../broker/account.ts";
 import type { Exchange } from "../broker/contracts.ts";
 import type { Quote } from "../broker/market-data.ts";
-import { getQuotes } from "../broker/market-data.ts";
+import { getQuotesGroupedByExchange } from "../broker/market-data.ts";
 import { getDb } from "../db/client.ts";
 import { agentLogs, dailySnapshots, positions, research, trades, watchlist } from "../db/schema.ts";
 import { buildLearningBrief, buildRecentContext } from "../learning/context-builder.ts";
@@ -199,8 +199,9 @@ async function shouldRunAnalysis(): Promise<MarketState> {
 		.orderBy(desc(watchlist.score))
 		.limit(10);
 
-	const symbols = watchlistItems.map((w) => w.symbol);
-	const quotes = await getQuotes(symbols);
+	const quotes = await getQuotesGroupedByExchange(
+		watchlistItems.map((w) => ({ symbol: w.symbol, exchange: w.exchange as Exchange })),
+	);
 
 	for (const [symbol, quote] of quotes) {
 		if (!quote.last) continue;
@@ -261,8 +262,9 @@ async function onActiveTradingTick(): Promise<void> {
 
 		// Update position prices if we have positions
 		if (positionRows.length > 0) {
-			const posSymbols = positionRows.map((p) => p.symbol);
-			const posQuotes = await getQuotes(posSymbols);
+			const posQuotes = await getQuotesGroupedByExchange(
+				positionRows.map((p) => ({ symbol: p.symbol, exchange: p.exchange as Exchange })),
+			);
 
 			for (const pos of positionRows) {
 				const quote = posQuotes.get(pos.symbol);
