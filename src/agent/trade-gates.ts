@@ -1,11 +1,12 @@
+import type { MarketPhase } from "../utils/clock.ts";
 import { getTradingMode } from "./prompts/trading-mode.ts";
-
-type MarketPhase = "pre-market" | "open" | "wind-down" | "post-market" | "research" | "closed";
 
 export interface TradeGateInput {
 	side: "BUY" | "SELL";
 	confidence: number;
 	marketPhase: MarketPhase;
+	/** Exchange-specific phase — used for wind-down/post-market checks when provided */
+	exchangePhase?: MarketPhase;
 	riskApproved: boolean;
 	riskReasons: string[];
 }
@@ -21,8 +22,9 @@ export function checkTradeGates(input: TradeGateInput): string | null {
 			return `Confidence ${input.confidence} below minimum ${minConfidence}`;
 		}
 
-		if (input.marketPhase === "wind-down" || input.marketPhase === "post-market") {
-			return `BUY orders rejected during ${input.marketPhase}`;
+		const phase = input.exchangePhase ?? input.marketPhase;
+		if (phase === "wind-down" || phase === "post-market") {
+			return `BUY orders rejected during ${phase}`;
 		}
 
 		if (!input.riskApproved) {

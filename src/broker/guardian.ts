@@ -4,6 +4,7 @@ import { agentLogs, positions, trades, watchlist } from "../db/schema.ts";
 import { HARD_LIMITS } from "../risk/limits.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
+import type { Exchange } from "./contracts.ts";
 import { getQuotes, type Quote } from "./market-data.ts";
 import { computeCleanupActions } from "./order-cleanup.ts";
 import { computeReconciliation } from "./order-reconcile.ts";
@@ -61,24 +62,42 @@ async function guardianTick(): Promise<void> {
 	try {
 		const db = getDb();
 
-		// Gather all symbols we need quotes for
+		// Gather all symbols we need quotes for, grouped by exchange
 		const positionRows = await db.select().from(positions);
 		const watchlistRows = await db
-			.select({ symbol: watchlist.symbol })
+			.select({ symbol: watchlist.symbol, exchange: watchlist.exchange })
 			.from(watchlist)
 			.where(eq(watchlist.active, true))
 			.limit(10);
 
-		const posSymbols = positionRows.map((p) => p.symbol);
-		const watchSymbols = watchlistRows.map((w) => w.symbol);
-		const allSymbols = [...new Set([...posSymbols, ...watchSymbols])];
+		const symbolExchangeMap = new Map<string, Exchange>();
+		for (const p of positionRows) {
+			symbolExchangeMap.set(p.symbol, p.exchange as Exchange);
+		}
+		for (const w of watchlistRows) {
+			if (!symbolExchangeMap.has(w.symbol)) {
+				symbolExchangeMap.set(w.symbol, w.exchange as Exchange);
+			}
+		}
 
-		if (allSymbols.length === 0) return;
+		if (symbolExchangeMap.size === 0) return;
 
-		// Single batch quote fetch — IBKR only, no FMP fallback.
-		// Guardian runs every 60s and would saturate FMP's 5 req/min rate limit,
-		// starving the orchestrator. Guardian gracefully skips symbols without quotes.
-		const quotes = await getQuotes(allSymbols, { skipFmpFallback: true });
+		// Group symbols by exchange and fetch quotes per-exchange.
+		// IBKR only, no FMP fallback — Guardian runs every 60s and would saturate FMP's rate limit.
+		const byExchange = new Map<Exchange, string[]>();
+		for (const [symbol, exchange] of symbolExchangeMap) {
+			const list = byExchange.get(exchange) ?? [];
+			list.push(symbol);
+			byExchange.set(exchange, list);
+		}
+
+		const quotes = new Map<string, Quote>();
+		for (const [exchange, symbols] of byExchange) {
+			const exchangeQuotes = await getQuotes(symbols, { skipFmpFallback: true, exchange });
+			for (const [symbol, quote] of exchangeQuotes) {
+				quotes.set(symbol, quote);
+			}
+		}
 
 		// 1. Stop-loss enforcement
 		await enforceStopLosses(positionRows, quotes);
@@ -101,12 +120,14 @@ async function enforceStopLosses(
 	positionRows: Array<{
 		id: number;
 		symbol: string;
+		exchange: string;
 		quantity: number;
 		stopLossPrice: number | null;
 	}>,
 	quotes: Map<string, Quote>,
 ): Promise<void> {
 	const breaches = findStopLossBreaches(positionRows, quotes);
+	const exchangeBySymbol = new Map(positionRows.map((p) => [p.symbol, p.exchange as Exchange]));
 
 	for (const breach of breaches) {
 		log.warn(
@@ -117,6 +138,7 @@ async function enforceStopLosses(
 		try {
 			await placeTrade({
 				symbol: breach.symbol,
+				exchange: exchangeBySymbol.get(breach.symbol),
 				side: "SELL",
 				quantity: breach.quantity,
 				orderType: "MARKET",
@@ -193,6 +215,7 @@ async function updateTrailingStops(
 	positionRows: Array<{
 		id: number;
 		symbol: string;
+		exchange: string;
 		quantity: number;
 		highWaterMark: number | null;
 		trailingStopPrice: number | null;
@@ -253,6 +276,7 @@ async function updateTrailingStops(
 			try {
 				await placeTrade({
 					symbol: pos.symbol,
+					exchange: pos.exchange as Exchange,
 					side: "SELL",
 					quantity: pos.quantity,
 					orderType: "MARKET",

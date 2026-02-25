@@ -1,8 +1,29 @@
+import type { Exchange } from "../broker/contracts.ts";
+
 const LONDON_TZ = "Europe/London";
 
-/** LSE trading hours in minutes from midnight (London time) */
-const MARKET_OPEN_MINUTES = 8 * 60; // 08:00
-const MARKET_CLOSE_MINUTES = 16 * 60 + 30; // 16:30
+/** Exchange session boundaries in minutes from midnight (London time) */
+const LSE_PRE_MARKET = 7 * 60 + 30; // 07:30
+const LSE_OPEN = 8 * 60; // 08:00
+const LSE_WIND_DOWN = 16 * 60 + 25; // 16:25
+const LSE_CLOSE = 16 * 60 + 30; // 16:30
+const LSE_POST_MARKET_END = 17 * 60; // 17:00
+
+const US_OPEN = 14 * 60 + 30; // 14:30 London
+const US_WIND_DOWN = 20 * 60 + 55; // 20:55 London
+const US_CLOSE = 21 * 60; // 21:00 London
+const US_POST_MARKET_END = 21 * 60 + 15; // 21:15 London
+
+const RESEARCH_START = 18 * 60; // 18:00
+const RESEARCH_END = 22 * 60; // 22:00
+
+export type MarketPhase =
+	| "pre-market"
+	| "open"
+	| "wind-down"
+	| "post-market"
+	| "research"
+	| "closed";
 
 function getLondonDate(date?: Date): {
 	hours: number;
@@ -22,43 +43,52 @@ function getLondonDate(date?: Date): {
 	return { hours, minutes, day, totalMinutes: hours * 60 + minutes };
 }
 
+function isWeekday(day: number): boolean {
+	return day !== 0 && day !== 6;
+}
+
 export function isMarketOpen(date?: Date): boolean {
 	const { day, totalMinutes } = getLondonDate(date);
-	if (day === 0 || day === 6) return false; // weekend
-	return totalMinutes >= MARKET_OPEN_MINUTES && totalMinutes < MARKET_CLOSE_MINUTES;
+	if (!isWeekday(day)) return false;
+	return totalMinutes >= LSE_OPEN && totalMinutes < LSE_CLOSE;
 }
 
-function isPreMarket(date?: Date): boolean {
+/** Get the trading phase for a specific exchange */
+export function getExchangePhase(exchange: Exchange, date?: Date): MarketPhase {
 	const { day, totalMinutes } = getLondonDate(date);
-	if (day === 0 || day === 6) return false;
-	return totalMinutes >= 7 * 60 + 30 && totalMinutes < MARKET_OPEN_MINUTES; // 07:30 - 08:00
+	if (!isWeekday(day)) return "closed";
+
+	if (exchange === "LSE") {
+		if (totalMinutes >= LSE_PRE_MARKET && totalMinutes < LSE_OPEN) return "pre-market";
+		if (totalMinutes >= LSE_WIND_DOWN && totalMinutes < LSE_CLOSE) return "wind-down";
+		if (totalMinutes >= LSE_OPEN && totalMinutes < LSE_WIND_DOWN) return "open";
+		if (totalMinutes >= LSE_CLOSE && totalMinutes < LSE_POST_MARKET_END) return "post-market";
+		return "closed";
+	}
+
+	// NASDAQ / NYSE — US hours in London time
+	if (totalMinutes >= US_WIND_DOWN && totalMinutes < US_CLOSE) return "wind-down";
+	if (totalMinutes >= US_OPEN && totalMinutes < US_WIND_DOWN) return "open";
+	if (totalMinutes >= US_CLOSE && totalMinutes < US_POST_MARKET_END) return "post-market";
+	return "closed";
 }
 
-function isPostMarket(date?: Date): boolean {
+/** Get the overall market phase across all exchanges.
+ *  Returns the most active phase: open > wind-down > post-market > pre-market > research > closed */
+export function getMarketPhase(date?: Date): MarketPhase {
 	const { day, totalMinutes } = getLondonDate(date);
-	if (day === 0 || day === 6) return false;
-	return totalMinutes >= MARKET_CLOSE_MINUTES && totalMinutes < 17 * 60; // 16:30 - 17:00
-}
+	if (!isWeekday(day)) return "closed";
 
-function isResearchWindow(date?: Date): boolean {
-	const { day, totalMinutes } = getLondonDate(date);
-	if (day === 0 || day === 6) return false;
-	return totalMinutes >= 18 * 60 && totalMinutes < 22 * 60; // 18:00 - 22:00
-}
+	const lse = getExchangePhase("LSE", date);
+	const us = getExchangePhase("NASDAQ", date);
 
-function isWindDown(date?: Date): boolean {
-	const { day, totalMinutes } = getLondonDate(date);
-	if (day === 0 || day === 6) return false;
-	return totalMinutes >= 16 * 60 + 25 && totalMinutes < MARKET_CLOSE_MINUTES; // 16:25 - 16:30
-}
+	if (lse === "open" || us === "open") return "open";
+	if (lse === "wind-down" || us === "wind-down") return "wind-down";
+	if (lse === "post-market" || us === "post-market") return "post-market";
+	if (lse === "pre-market") return "pre-market";
 
-export function getMarketPhase(
-	date?: Date,
-): "pre-market" | "open" | "wind-down" | "post-market" | "research" | "closed" {
-	if (isPreMarket(date)) return "pre-market";
-	if (isWindDown(date)) return "wind-down";
-	if (isMarketOpen(date)) return "open";
-	if (isPostMarket(date)) return "post-market";
-	if (isResearchWindow(date)) return "research";
+	// Research window (global, not exchange-specific)
+	if (totalMinutes >= RESEARCH_START && totalMinutes < RESEARCH_END) return "research";
+
 	return "closed";
 }

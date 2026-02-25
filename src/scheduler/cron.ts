@@ -7,9 +7,10 @@ const log = createChildLogger({ module: "scheduler" });
 const tasks: ScheduledTask[] = [];
 
 export function startScheduler(): void {
-	// Main orchestrator tick - every 10 minutes during market hours (8:00-16:30 UK)
+	// Main orchestrator tick - every 10 minutes during extended market hours (08:00-20:50 UK)
+	// Covers LSE (08:00-16:30) + US (14:30-21:00) sessions
 	tasks.push(
-		cron.schedule("*/10 8-16 * * 1-5", () => runJobs("orchestrator_tick"), {
+		cron.schedule("*/10 8-20 * * 1-5", () => runJobs("orchestrator_tick"), {
 			timezone: "Europe/London",
 		}),
 	);
@@ -21,9 +22,9 @@ export function startScheduler(): void {
 		}),
 	);
 
-	// Post-market at 16:35
+	// Post-market at 21:05 (after both LSE and US sessions close)
 	tasks.push(
-		cron.schedule("35 16 * * 1-5", () => runJobs("post_market"), {
+		cron.schedule("5 21 * * 1-5", () => runJobs("post_market"), {
 			timezone: "Europe/London",
 		}),
 	);

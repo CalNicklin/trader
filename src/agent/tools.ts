@@ -9,7 +9,7 @@ import { research, trades, watchlist } from "../db/schema.ts";
 import { researchSymbol } from "../research/pipeline.ts";
 import { updateScore } from "../research/watchlist.ts";
 import { checkTradeRisk, getAtrPositionSize, getMaxPositionSize } from "../risk/manager.ts";
-import { getMarketPhase } from "../utils/clock.ts";
+import { getExchangePhase, getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { addIntention, getPendingIntentions } from "./intentions.ts";
 import { checkTradeGates } from "./trade-gates.ts";
@@ -316,6 +316,7 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 				const confidence = input.confidence as number;
 				const symbol = input.symbol as string;
 				const quantity = input.quantity as number;
+				const exchange = (input.exchange as "LSE" | "NASDAQ" | "NYSE" | undefined) ?? "LSE";
 				const estimatedPrice =
 					(input.estimatedPrice as number | undefined) ??
 					(input.limitPrice as number | undefined) ??
@@ -330,6 +331,7 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 					side,
 					confidence,
 					marketPhase: getMarketPhase(),
+					exchangePhase: getExchangePhase(exchange),
 					riskApproved: riskResult.approved,
 					riskReasons: riskResult.reasons,
 				});
@@ -341,6 +343,7 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 
 				const tradeReq: TradeRequest = {
 					symbol,
+					exchange,
 					side,
 					quantity,
 					orderType: input.orderType as "LIMIT" | "MARKET",
