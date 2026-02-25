@@ -8,11 +8,11 @@ export const HARD_LIMITS = {
 	ISA_LSE_ONLY: true,
 
 	/** Maximum single position as % of portfolio */
-	MAX_POSITION_PCT: 5,
+	MAX_POSITION_PCT: 15,
 	/** Hard cap on single position in GBP */
 	MAX_POSITION_GBP: 50_000,
 	/** Minimum cash reserve as % of portfolio */
-	MIN_CASH_RESERVE_PCT: 20,
+	MIN_CASH_RESERVE_PCT: 10,
 
 	/** Per-trade stop loss % (fallback when ATR unavailable) */
 	PER_TRADE_STOP_LOSS_PCT: 3,
@@ -30,7 +30,7 @@ export const HARD_LIMITS = {
 	WEEKLY_LOSS_LIMIT_PCT: 5,
 
 	/** Maximum number of open positions */
-	MAX_POSITIONS: 10,
+	MAX_POSITIONS: 5,
 	/** Maximum trades per day */
 	MAX_TRADES_PER_DAY: 10,
 	/** Minimum minutes between trades (live mode — paper mode uses shorter interval) */
@@ -51,6 +51,26 @@ export const HARD_LIMITS = {
 
 const PAPER_TRADE_INTERVAL_MIN = 2;
 
-export function getTradeIntervalMin(mode: "paper" | "live"): number {
+export type TradingMode = "paper" | "live";
+
+type WidenNumbers<T> = {
+	[K in keyof T]: T[K] extends number ? number : T[K];
+};
+
+export type ActiveLimits = WidenNumbers<typeof HARD_LIMITS>;
+
+export function getActiveLimits(mode: TradingMode): ActiveLimits {
+	if (mode === "paper") {
+		return {
+			...HARD_LIMITS,
+			MIN_CASH_RESERVE_PCT: 5,
+			DAILY_LOSS_LIMIT_PCT: 5,
+			WEEKLY_LOSS_LIMIT_PCT: 10,
+		};
+	}
+	return { ...HARD_LIMITS };
+}
+
+export function getTradeIntervalMin(mode: TradingMode): number {
 	return mode === "paper" ? PAPER_TRADE_INTERVAL_MIN : HARD_LIMITS.MIN_TRADE_INTERVAL_MIN;
 }

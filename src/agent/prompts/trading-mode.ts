@@ -9,10 +9,11 @@ export function getTradingMode(): TradingMode {
 const PAPER_CONTEXT = `## Trading Mode: PAPER
 You are trading on a paper (simulated) account. The entire purpose is to generate trades so the learning loop has data.
 
-- Take trades when the thesis is reasonable — the learning from real executions is more valuable than waiting for perfection
+- Lean into high-momentum setups. The learning value of an executed trade far exceeds the value of another WATCH decision.
+- When you see momentum confirmation (price > SMA20, volume above average, RSI 50-70), act on it.
 - Confidence threshold: >= 0.5 is sufficient to act
 - Risk/reward ratio: >= 1.5:1 is acceptable
-- Err on the side of action — a mediocre trade that generates learning beats endless watching
+- Aim for 3-5 active positions. Sitting in cash with zero positions is a failure state during paper trading.
 - Stop losses and position sizing still apply (the habits must be real even if the money isn't)`;
 
 const LIVE_CONTEXT = `## Trading Mode: LIVE

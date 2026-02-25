@@ -6,7 +6,7 @@ import { dailySnapshots, positions, trades, watchlist } from "../db/schema.ts";
 import { getYahooQuote } from "../research/sources/yahoo-finance.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { isSectorExcluded, isSymbolExcluded } from "./exclusions.ts";
-import { getTradeIntervalMin, HARD_LIMITS } from "./limits.ts";
+import { getActiveLimits, getTradeIntervalMin, HARD_LIMITS } from "./limits.ts";
 
 const log = createChildLogger({ module: "risk-manager" });
 
@@ -53,30 +53,28 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 	}
 
 	// --- Account checks ---
+	const mode = getTradingMode();
+	const limits = getActiveLimits(mode);
 	const account = await getAccountSummary();
 	const tradeValue = proposal.quantity * proposal.estimatedPrice;
 
 	// Position size as % of portfolio
 	const positionPct = (tradeValue / account.netLiquidation) * 100;
-	if (positionPct > HARD_LIMITS.MAX_POSITION_PCT) {
-		reasons.push(
-			`Position ${positionPct.toFixed(1)}% exceeds max ${HARD_LIMITS.MAX_POSITION_PCT}%`,
-		);
+	if (positionPct > limits.MAX_POSITION_PCT) {
+		reasons.push(`Position ${positionPct.toFixed(1)}% exceeds max ${limits.MAX_POSITION_PCT}%`);
 	}
 
 	// Hard GBP cap
-	if (tradeValue > HARD_LIMITS.MAX_POSITION_GBP) {
-		reasons.push(
-			`Position £${tradeValue.toFixed(0)} exceeds hard cap £${HARD_LIMITS.MAX_POSITION_GBP}`,
-		);
+	if (tradeValue > limits.MAX_POSITION_GBP) {
+		reasons.push(`Position £${tradeValue.toFixed(0)} exceeds hard cap £${limits.MAX_POSITION_GBP}`);
 	}
 
 	// Cash reserve check
 	const cashAfterTrade = account.totalCashValue - tradeValue;
 	const cashReservePct = (cashAfterTrade / account.netLiquidation) * 100;
-	if (cashReservePct < HARD_LIMITS.MIN_CASH_RESERVE_PCT) {
+	if (cashReservePct < limits.MIN_CASH_RESERVE_PCT) {
 		reasons.push(
-			`Cash reserve would be ${cashReservePct.toFixed(1)}% (min ${HARD_LIMITS.MIN_CASH_RESERVE_PCT}%)`,
+			`Cash reserve would be ${cashReservePct.toFixed(1)}% (min ${limits.MIN_CASH_RESERVE_PCT}%)`,
 		);
 	}
 
@@ -84,8 +82,8 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 	const db = getDb();
 	const openPositions = await db.select().from(positions);
 	const existingPosition = openPositions.find((p) => p.symbol === proposal.symbol);
-	if (!existingPosition && openPositions.length >= HARD_LIMITS.MAX_POSITIONS) {
-		reasons.push(`Max positions (${HARD_LIMITS.MAX_POSITIONS}) reached`);
+	if (!existingPosition && openPositions.length >= limits.MAX_POSITIONS) {
+		reasons.push(`Max positions (${limits.MAX_POSITIONS}) reached`);
 	}
 
 	// --- Sector concentration check ---
@@ -163,13 +161,19 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 	}
 
 	// --- Daily loss limit ---
-	const dailyLossCheck = await checkDailyLossLimit(account.netLiquidation);
+	const dailyLossCheck = await checkDailyLossLimit(
+		account.netLiquidation,
+		limits.DAILY_LOSS_LIMIT_PCT,
+	);
 	if (dailyLossCheck.breached) {
 		reasons.push(`Daily loss limit breached: ${dailyLossCheck.message}`);
 	}
 
 	// --- Weekly loss limit ---
-	const weeklyLossCheck = await checkWeeklyLossLimit(account.netLiquidation);
+	const weeklyLossCheck = await checkWeeklyLossLimit(
+		account.netLiquidation,
+		limits.WEEKLY_LOSS_LIMIT_PCT,
+	);
 	if (weeklyLossCheck.breached) {
 		reasons.push(`Weekly loss limit breached: ${weeklyLossCheck.message}`);
 	}
@@ -186,9 +190,9 @@ export async function checkTradeRisk(proposal: TradeProposal): Promise<RiskCheck
 
 async function checkDailyLossLimit(
 	portfolioValue: number,
+	limitPct: number,
 ): Promise<{ breached: boolean; message: string }> {
 	const db = getDb();
-	// Get today's snapshot or use yesterday's as baseline
 	const snapshots = await db
 		.select()
 		.from(dailySnapshots)
@@ -202,10 +206,10 @@ async function checkDailyLossLimit(
 	const baseline = snapshots[0]!.portfolioValue;
 	const loss = ((portfolioValue - baseline) / baseline) * 100;
 
-	if (loss < -HARD_LIMITS.DAILY_LOSS_LIMIT_PCT) {
+	if (loss < -limitPct) {
 		return {
 			breached: true,
-			message: `Daily loss ${loss.toFixed(2)}% exceeds -${HARD_LIMITS.DAILY_LOSS_LIMIT_PCT}%`,
+			message: `Daily loss ${loss.toFixed(2)}% exceeds -${limitPct}%`,
 		};
 	}
 
@@ -214,6 +218,7 @@ async function checkDailyLossLimit(
 
 async function checkWeeklyLossLimit(
 	portfolioValue: number,
+	limitPct: number,
 ): Promise<{ breached: boolean; message: string }> {
 	const db = getDb();
 	const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]!;
@@ -232,10 +237,10 @@ async function checkWeeklyLossLimit(
 	const baseline = snapshots[0]!.portfolioValue;
 	const loss = ((portfolioValue - baseline) / baseline) * 100;
 
-	if (loss < -HARD_LIMITS.WEEKLY_LOSS_LIMIT_PCT) {
+	if (loss < -limitPct) {
 		return {
 			breached: true,
-			message: `Weekly loss ${loss.toFixed(2)}% exceeds -${HARD_LIMITS.WEEKLY_LOSS_LIMIT_PCT}%`,
+			message: `Weekly loss ${loss.toFixed(2)}% exceeds -${limitPct}%`,
 		};
 	}
 
@@ -254,15 +259,14 @@ export function calculateStopLoss(entryPrice: number, atr?: number): number {
 export async function getMaxPositionSize(
 	price: number,
 ): Promise<{ maxQuantity: number; maxValue: number }> {
+	const limits = getActiveLimits(getTradingMode());
 	const account = await getAccountSummary();
 
-	// Position size limits
-	const pctLimit = (account.netLiquidation * HARD_LIMITS.MAX_POSITION_PCT) / 100;
-	const gbpLimit = HARD_LIMITS.MAX_POSITION_GBP;
+	const pctLimit = (account.netLiquidation * limits.MAX_POSITION_PCT) / 100;
+	const gbpLimit = limits.MAX_POSITION_GBP;
 
-	// Cash reserve constraint
 	const availableCash =
-		account.totalCashValue - (account.netLiquidation * HARD_LIMITS.MIN_CASH_RESERVE_PCT) / 100;
+		account.totalCashValue - (account.netLiquidation * limits.MIN_CASH_RESERVE_PCT) / 100;
 
 	const maxValue = Math.min(pctLimit, gbpLimit, Math.max(0, availableCash));
 	const maxQuantity = Math.floor(maxValue / price);
@@ -285,23 +289,24 @@ export interface AtrPositionSize {
  * Cross-checks against existing hard limits.
  */
 export async function getAtrPositionSize(price: number, atr: number): Promise<AtrPositionSize> {
+	const limits = getActiveLimits(getTradingMode());
 	const account = await getAccountSummary();
 
-	const riskPerShare = atr * HARD_LIMITS.STOP_LOSS_ATR_MULTIPLIER;
-	const riskBudget = (account.netLiquidation * HARD_LIMITS.RISK_PER_TRADE_PCT) / 100;
+	const riskPerShare = atr * limits.STOP_LOSS_ATR_MULTIPLIER;
+	const riskBudget = (account.netLiquidation * limits.RISK_PER_TRADE_PCT) / 100;
 	const atrBasedQuantity = Math.floor(riskBudget / riskPerShare);
 	const atrBasedValue = atrBasedQuantity * price;
 
-	const pctLimit = (account.netLiquidation * HARD_LIMITS.MAX_POSITION_PCT) / 100;
-	const gbpLimit = HARD_LIMITS.MAX_POSITION_GBP;
+	const pctLimit = (account.netLiquidation * limits.MAX_POSITION_PCT) / 100;
+	const gbpLimit = limits.MAX_POSITION_GBP;
 	const availableCash =
-		account.totalCashValue - (account.netLiquidation * HARD_LIMITS.MIN_CASH_RESERVE_PCT) / 100;
+		account.totalCashValue - (account.netLiquidation * limits.MIN_CASH_RESERVE_PCT) / 100;
 
 	const maxValue = Math.min(atrBasedValue, pctLimit, gbpLimit, Math.max(0, availableCash));
 	const maxQuantity = Math.floor(maxValue / price);
 
 	const stopLossPrice = price - riskPerShare;
-	const targetPrice = price + atr * HARD_LIMITS.TARGET_ATR_MULTIPLIER;
+	const targetPrice = price + atr * limits.TARGET_ATR_MULTIPLIER;
 
 	return {
 		maxQuantity,
