@@ -163,6 +163,13 @@ async function runAgent(
 				}
 			}
 
+			// Mark last tool result for caching so subsequent iterations read
+			// the growing conversation history at cache-read rates (~90% cheaper)
+			if (toolResults.length > 0) {
+				const last = toolResults[toolResults.length - 1]!;
+				toolResults[toolResults.length - 1] = { ...last, cache_control: { type: "ephemeral" } };
+			}
+
 			messages.push({ role: "user", content: toolResults });
 		} else {
 			// Final response - extract text

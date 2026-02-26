@@ -7,10 +7,10 @@ export const PRICING = {
 
 const HAIKU_JOBS = new Set([
 	"quick_scan",
-	"research",
 	"trade_reviewer",
 	"pattern_analyzer",
 	"news_discovery",
+	"decision_scorer_extract",
 ]);
 
 type Tier = keyof typeof PRICING;
@@ -28,13 +28,12 @@ export function estimateCost(
 	cacheReadTokens?: number,
 ): number {
 	const p = getPricing(job);
-	// Cache tokens are already counted in inputTokens — subtract them to avoid double-counting,
-	// then add back at their discounted rates
+	// Anthropic API: input_tokens already EXCLUDES cache tokens.
+	// total_input = input_tokens + cache_creation + cache_read (they're additive, not overlapping)
 	const cacheWrite = cacheCreationTokens ?? 0;
 	const cacheRead = cacheReadTokens ?? 0;
-	const normalInput = inputTokens - cacheWrite - cacheRead;
 	return (
-		(normalInput * p.input +
+		(inputTokens * p.input +
 			outputTokens * p.output +
 			cacheWrite * p.cacheWrite +
 			cacheRead * p.cacheRead) /

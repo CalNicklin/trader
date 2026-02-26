@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getConfig } from "../config.ts";
 import { createChildLogger } from "../utils/logger.ts";
+import { recordUsage } from "../utils/token-tracker.ts";
 
 const log = createChildLogger({ module: "self-improve-codegen" });
 
@@ -48,6 +49,12 @@ Return the complete modified file content:`;
 			max_tokens: 8192,
 			messages: [{ role: "user", content: prompt }],
 		});
+
+		await recordUsage(
+			"code_generation",
+			response.usage.input_tokens,
+			response.usage.output_tokens,
+		);
 
 		const text = response.content
 			.filter((b): b is Anthropic.TextBlock => b.type === "text")

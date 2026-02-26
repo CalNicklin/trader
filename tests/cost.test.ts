@@ -14,13 +14,13 @@ describe("estimateCost", () => {
 		expect(cost).toBeCloseTo(18, 2);
 	});
 
-	test("all five Haiku jobs are correctly tiered", () => {
+	test("Haiku jobs are correctly tiered", () => {
 		const haiku_jobs = [
 			"quick_scan",
-			"research",
 			"trade_reviewer",
 			"pattern_analyzer",
 			"news_discovery",
+			"decision_scorer_extract",
 		];
 		for (const job of haiku_jobs) {
 			const cost = estimateCost(job, 1_000_000, 0);
@@ -28,29 +28,30 @@ describe("estimateCost", () => {
 		}
 	});
 
+	test("research uses Sonnet rates (analyzer calls CLAUDE_MODEL)", () => {
+		const cost = estimateCost("research", 1_000_000, 0);
+		expect(cost).toBeCloseTo(3, 2); // $3/MTok at Sonnet
+	});
+
 	test("unknown job defaults to Sonnet rates", () => {
 		const cost = estimateCost("some_new_job", 1_000_000, 0);
 		expect(cost).toBeCloseTo(3, 2); // $3/MTok input at Sonnet
 	});
 
-	test("cache tokens are subtracted from input and charged at discounted rates", () => {
-		// Sonnet: 1M total input, 200k cache write, 300k cache read, 500k output
-		// normalInput = 1M - 200k - 300k = 500k
-		// cost = (500k × $3 + 500k × $15 + 200k × $3.75 + 300k × $0.30) / 1M
-		//      = (1.5 + 7.5 + 0.75 + 0.09)
-		//      = 9.84
+	test("cache tokens are additive (input_tokens already excludes cache per Anthropic API)", () => {
+		// Sonnet: 1M non-cache input, 200k cache write, 300k cache read, 500k output
+		// cost = (1M × $3 + 500k × $15 + 200k × $3.75 + 300k × $0.30) / 1M
+		//      = (3.0 + 7.5 + 0.75 + 0.09) = 11.34
 		const cost = estimateCost("trading_analyst", 1_000_000, 500_000, 200_000, 300_000);
-		expect(cost).toBeCloseTo(9.84, 2);
+		expect(cost).toBeCloseTo(11.34, 2);
 	});
 
 	test("cache tokens with Haiku rates", () => {
-		// Haiku: 1M total input, 400k cache write, 200k cache read, 100k output
-		// normalInput = 1M - 400k - 200k = 400k
-		// cost = (400k × $1 + 100k × $5 + 400k × $1.25 + 200k × $0.10) / 1M
-		//      = (0.4 + 0.5 + 0.5 + 0.02)
-		//      = 1.42
+		// Haiku: 1M non-cache input, 400k cache write, 200k cache read, 100k output
+		// cost = (1M × $1 + 100k × $5 + 400k × $1.25 + 200k × $0.10) / 1M
+		//      = (1.0 + 0.5 + 0.5 + 0.02) = 2.02
 		const cost = estimateCost("quick_scan", 1_000_000, 100_000, 400_000, 200_000);
-		expect(cost).toBeCloseTo(1.42, 2);
+		expect(cost).toBeCloseTo(2.02, 2);
 	});
 
 	test("zero tokens returns zero cost", () => {
