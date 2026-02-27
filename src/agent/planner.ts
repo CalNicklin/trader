@@ -118,6 +118,7 @@ async function runAgent(
 		const response = await client.messages.create({
 			model: config.CLAUDE_MODEL,
 			max_tokens: 4096,
+			cache_control: { type: "ephemeral" },
 			system,
 			tools: cachedTools,
 			messages,
@@ -161,13 +162,6 @@ async function runAgent(
 						content: result,
 					});
 				}
-			}
-
-			// Mark last tool result for caching so subsequent iterations read
-			// the growing conversation history at cache-read rates (~90% cheaper)
-			if (toolResults.length > 0) {
-				const last = toolResults[toolResults.length - 1]!;
-				toolResults[toolResults.length - 1] = { ...last, cache_control: { type: "ephemeral" } };
 			}
 
 			messages.push({ role: "user", content: toolResults });

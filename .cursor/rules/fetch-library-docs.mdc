@@ -1,0 +1,37 @@
+---
+description: Use Context7 MCP to fetch up-to-date library documentation before implementing features that depend on external APIs or SDKs
+alwaysApply: true
+---
+
+# Fetch Library Docs via Context7
+
+Before implementing or modifying code that depends on an external library or API, use the Context7 MCP to fetch current documentation rather than relying on training data.
+
+## When to fetch
+
+- Integrating a new library feature (e.g. prompt caching, streaming, batch API)
+- Hitting an unexpected API error or type mismatch
+- Upgrading a dependency to a new major/minor version
+- Uncertain whether a parameter, method, or pattern is still current
+
+## How
+
+1. Call `mcp_context7_resolve-library-id` with the library name (e.g. `anthropic sdk typescript`, `drizzle orm`)
+2. Call `mcp_context7_get-library-docs` with the resolved ID and a topic query (e.g. `prompt caching`, `sqlite migrations`)
+3. Use the returned docs as the source of truth for types, parameters, and usage patterns
+
+## Key libraries in this project
+
+| Library | Context7 search term |
+|---------|---------------------|
+| Anthropic Claude SDK | `anthropic sdk typescript` |
+| Drizzle ORM | `drizzle orm` |
+| Zod | `zod` |
+| @stoqey/ib (IBKR) | `stoqey ib` |
+| Biome | `biome` |
+
+## Do NOT
+
+- Guess API shapes from memory when docs are one MCP call away
+- Assume training-data knowledge of SDK types is current — versions move fast
+- Skip fetching when a TypeScript type error suggests the SDK has changed
