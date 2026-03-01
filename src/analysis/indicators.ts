@@ -26,6 +26,10 @@ export interface TechnicalIndicators {
 	bollingerLower: number | null;
 	bollingerPercentB: number | null;
 
+	adx14: number | null;
+	adxTrend: "strong" | "trending" | "weak" | null;
+	macdHistogramTrend: "expanding" | "contracting" | "flat" | null;
+
 	volumeSma20: number | null;
 	volumeRatio: number | null;
 	volumeTrend: "increasing" | "stable" | "decreasing" | null;
@@ -102,6 +106,86 @@ function macd(closes: readonly number[]): {
 		signal: latestSignal,
 		histogram: latestLine - latestSignal,
 	};
+}
+
+function adx(bars: readonly HistoricalBar[], period = 14): number | null {
+	if (bars.length < period * 2 + 1) return null;
+
+	const plusDM: number[] = [];
+	const minusDM: number[] = [];
+	const trueRanges: number[] = [];
+
+	for (let i = 1; i < bars.length; i++) {
+		const highDiff = bars[i]!.high - bars[i - 1]!.high;
+		const lowDiff = bars[i - 1]!.low - bars[i]!.low;
+		plusDM.push(highDiff > lowDiff && highDiff > 0 ? highDiff : 0);
+		minusDM.push(lowDiff > highDiff && lowDiff > 0 ? lowDiff : 0);
+		trueRanges.push(
+			Math.max(
+				bars[i]!.high - bars[i]!.low,
+				Math.abs(bars[i]!.high - bars[i - 1]!.close),
+				Math.abs(bars[i]!.low - bars[i - 1]!.close),
+			),
+		);
+	}
+
+	let smoothedPlusDM = plusDM.slice(0, period).reduce((a, b) => a + b, 0);
+	let smoothedMinusDM = minusDM.slice(0, period).reduce((a, b) => a + b, 0);
+	let smoothedTR = trueRanges.slice(0, period).reduce((a, b) => a + b, 0);
+
+	const dxValues: number[] = [];
+
+	for (let i = period; i < trueRanges.length; i++) {
+		if (i > period) {
+			smoothedPlusDM = smoothedPlusDM - smoothedPlusDM / period + plusDM[i]!;
+			smoothedMinusDM = smoothedMinusDM - smoothedMinusDM / period + minusDM[i]!;
+			smoothedTR = smoothedTR - smoothedTR / period + trueRanges[i]!;
+		}
+
+		if (smoothedTR === 0) continue;
+		const plusDI = (smoothedPlusDM / smoothedTR) * 100;
+		const minusDI = (smoothedMinusDM / smoothedTR) * 100;
+		const diSum = plusDI + minusDI;
+		if (diSum === 0) continue;
+		dxValues.push((Math.abs(plusDI - minusDI) / diSum) * 100);
+	}
+
+	if (dxValues.length < period) return null;
+
+	let adxVal = dxValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
+	for (let i = period; i < dxValues.length; i++) {
+		adxVal = (adxVal * (period - 1) + dxValues[i]!) / period;
+	}
+	return adxVal;
+}
+
+function classifyAdx(value: number | null): TechnicalIndicators["adxTrend"] {
+	if (value === null) return null;
+	if (value > 40) return "strong";
+	if (value > 25) return "trending";
+	return "weak";
+}
+
+function classifyMacdHistogramTrend(
+	closes: readonly number[],
+): TechnicalIndicators["macdHistogramTrend"] {
+	if (closes.length < 38) return null;
+
+	const histograms: number[] = [];
+	for (let offset = 2; offset >= 0; offset--) {
+		const slice = closes.slice(0, closes.length - offset || undefined);
+		const result = macd(slice);
+		if (result.histogram === null) return null;
+		histograms.push(result.histogram);
+	}
+
+	const d1 = Math.abs(histograms[1]!) - Math.abs(histograms[0]!);
+	const d2 = Math.abs(histograms[2]!) - Math.abs(histograms[1]!);
+	const threshold = 0.01;
+
+	if (d1 > threshold && d2 > threshold) return "expanding";
+	if (d1 < -threshold && d2 < -threshold) return "contracting";
+	return "flat";
 }
 
 function atr(bars: readonly HistoricalBar[], period = 14): number | null {
@@ -214,6 +298,7 @@ export function computeIndicators(
 	const sma200Val = sma(closes, 200);
 	const rsi14Val = rsi(closes, 14);
 	const macdResult = macd(closes);
+	const adx14Val = adx(bars, 14);
 	const atr14Val = atr(bars, 14);
 	const bbands = bollingerBands(closes, 20, 2);
 
@@ -250,6 +335,9 @@ export function computeIndicators(
 		macdSignal: macdResult.signal,
 		macdHistogram: macdResult.histogram,
 		macdCrossover: detectMacdCrossover(closes),
+		adx14: adx14Val,
+		adxTrend: classifyAdx(adx14Val),
+		macdHistogramTrend: classifyMacdHistogramTrend(closes),
 		atr14: atr14Val,
 		atrPercent: atr14Val ? (atr14Val / currentPrice) * 100 : null,
 		bollingerUpper: bbands.upper,
@@ -332,6 +420,12 @@ export function formatIndicatorSummary(ind: TechnicalIndicators): string {
 	}
 	if (ind.macdCrossover !== "none") {
 		parts.push(`MACD: ${ind.macdCrossover} crossover`);
+	}
+	if (ind.adx14 !== null) {
+		parts.push(`ADX(14): ${ind.adx14.toFixed(0)} (${ind.adxTrend})`);
+	}
+	if (ind.macdHistogramTrend) {
+		parts.push(`MACD hist: ${ind.macdHistogramTrend}`);
 	}
 	if (ind.atrPercent !== null) {
 		parts.push(`ATR: ${ind.atrPercent.toFixed(1)}% daily`);

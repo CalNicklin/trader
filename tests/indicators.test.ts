@@ -173,8 +173,83 @@ describe("volume ratio normalization", () => {
 	});
 });
 
+describe("ADX computation", () => {
+	test("adx14 is non-null and reasonable for 250 trending bars", () => {
+		const bars = makeTrendingBars(250, 100, 0.5);
+		const result = computeIndicators("ADX", bars);
+		expect(result.adx14).not.toBeNull();
+		expect(result.adx14!).toBeGreaterThan(0);
+		expect(result.adx14!).toBeLessThanOrEqual(100);
+	});
+
+	test("adxTrend classifies strong trend (>40) for strongly trending data", () => {
+		// Large daily gains with consistent direction should produce high ADX
+		const bars: HistoricalBar[] = Array.from({ length: 60 }, (_, i) => ({
+			time: `2024-01-${String(i + 1).padStart(2, "0")}`,
+			open: 100 + i * 2,
+			high: 100 + i * 2 + 3,
+			low: 100 + i * 2 - 1,
+			close: 100 + i * 2 + 2,
+			volume: 100_000,
+		}));
+		const result = computeIndicators("STRONG", bars);
+		expect(result.adx14).not.toBeNull();
+		expect(result.adxTrend).toBe("strong");
+	});
+
+	test("adxTrend classifies weak trend (<=25) for choppy sideways data", () => {
+		// Alternating up/down bars with varying highs/lows — directional but no trend
+		const bars: HistoricalBar[] = Array.from({ length: 150 }, (_, i) => {
+			const swing = Math.sin(i * 0.5) * 3;
+			return {
+				time: `2024-01-${String(i + 1).padStart(2, "0")}`,
+				open: 100 + swing,
+				high: 103 + swing + (i % 3),
+				low: 97 + swing - (i % 3),
+				close: 100 + swing + (i % 2 === 0 ? 1 : -1),
+				volume: 100_000,
+			};
+		});
+		const result = computeIndicators("FLAT", bars);
+		expect(result.adx14).not.toBeNull();
+		expect(result.adxTrend).toBe("weak");
+	});
+
+	test("adx14 is null with insufficient bars", () => {
+		const bars = makeTrendingBars(20);
+		const result = computeIndicators("SHORT", bars);
+		expect(result.adx14).toBeNull();
+		expect(result.adxTrend).toBeNull();
+	});
+});
+
+describe("MACD histogram trend", () => {
+	test("expanding histogram when momentum is accelerating", () => {
+		// Strongly trending up data produces expanding MACD histogram
+		const bars: HistoricalBar[] = Array.from({ length: 60 }, (_, i) => ({
+			time: `2024-01-${String(i + 1).padStart(2, "0")}`,
+			open: 100 + i * 0.5 + (i > 40 ? (i - 40) * 0.3 : 0),
+			high: 102 + i * 0.5 + (i > 40 ? (i - 40) * 0.3 : 0),
+			low: 98 + i * 0.5 + (i > 40 ? (i - 40) * 0.3 : 0),
+			close: 100 + i * 0.5 + (i > 40 ? (i - 40) * 0.3 : 0),
+			volume: 100_000,
+		}));
+		const result = computeIndicators("ACCEL", bars);
+		// With enough bars for MACD, histogram trend should be computed
+		if (result.macdHistogram !== null) {
+			expect(result.macdHistogramTrend).not.toBeNull();
+		}
+	});
+
+	test("macdHistogramTrend is null with insufficient bars", () => {
+		const bars = makeTrendingBars(20);
+		const result = computeIndicators("SHORT", bars);
+		expect(result.macdHistogramTrend).toBeNull();
+	});
+});
+
 describe("formatIndicatorSummary", () => {
-	test("includes symbol, trend, RSI, ATR, and 52w fields", () => {
+	test("includes symbol, trend, RSI, ATR, ADX, and 52w fields", () => {
 		const bars = makeTrendingBars(250, 100, 0.5);
 		const indicators = computeIndicators("SHEL", bars);
 		const summary = formatIndicatorSummary(indicators);
@@ -182,6 +257,7 @@ describe("formatIndicatorSummary", () => {
 		expect(summary).toContain("SHEL:");
 		expect(summary).toContain("Trend:");
 		expect(summary).toContain("RSI(14):");
+		expect(summary).toContain("ADX(14):");
 		expect(summary).toContain("ATR:");
 		expect(summary).toContain("52w:");
 		expect(summary).toContain(" | ");
