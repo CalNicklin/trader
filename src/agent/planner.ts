@@ -202,10 +202,45 @@ async function runAgent(
 			}
 		}
 
-		log.warn({ maxIterations }, "Agent hit max iterations");
+		log.warn({ maxIterations }, "Agent hit max iterations — forcing final response");
+
+		messages.push({
+			role: "user",
+			content:
+				"You have used all available tool iterations. Based on everything you have gathered so far, provide your final trading decision and reasoning now. No more tool calls are available.",
+		});
+
+		const finalResponse = await client.messages.create({
+			model: config.CLAUDE_MODEL,
+			max_tokens: 4096,
+			system,
+			messages,
+		});
+
+		totalInputTokens += finalResponse.usage.input_tokens;
+		totalOutputTokens += finalResponse.usage.output_tokens;
+		totalCacheCreationTokens += finalResponse.usage.cache_creation_input_tokens ?? 0;
+		totalCacheReadTokens += finalResponse.usage.cache_read_input_tokens ?? 0;
+
+		const finalText = finalResponse.content
+			.filter((b): b is Anthropic.TextBlock => b.type === "text")
+			.map((b) => b.text)
+			.join("\n");
+
+		const db = getDb();
+		await db.insert(agentLogs).values({
+			level: "DECISION",
+			phase: "trading",
+			message: `[max_iterations] ${finalText.substring(0, 500)}`,
+			data: JSON.stringify({
+				tokensUsed: { input: totalInputTokens, output: totalOutputTokens },
+				maxIterationsReached: true,
+			}),
+		});
+
 		sessionStatus = "max_iterations";
 		return {
-			text: "Max iterations reached without final response",
+			text: finalText,
 			toolCalls: allToolCalls,
 			tokensUsed: { input: totalInputTokens, output: totalOutputTokens },
 		};
