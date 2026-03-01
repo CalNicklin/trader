@@ -176,7 +176,16 @@ export async function getHistoricalBars(
 	const api = getApi();
 	const contract = getContract(symbol, exchange);
 
-	const bars = await api.getHistoricalData(contract, "", duration, barSize, "TRADES", 1, 1);
+	const TIMEOUT_MS = 15_000;
+	const bars = await Promise.race([
+		api.getHistoricalData(contract, "", duration, barSize, "TRADES", 1, 1),
+		new Promise<never>((_, reject) =>
+			setTimeout(
+				() => reject(new Error(`Historical bars timeout for ${symbol} after ${TIMEOUT_MS}ms`)),
+				TIMEOUT_MS,
+			),
+		),
+	]);
 
 	return bars.map((bar) => ({
 		time: bar.time ?? "",
