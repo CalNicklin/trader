@@ -95,6 +95,64 @@ describe("evaluateGate", () => {
 		expect(result.reasons.length).toBeGreaterThanOrEqual(3);
 	});
 
+	test("fails when MACD bearish + histogram contracting + requireBullishMacd: true", () => {
+		const gate: MomentumGateConfig = {
+			...DEFAULT_GATE,
+			requireBullishMacd: true,
+		};
+		const result = evaluateGate(
+			makeIndicators({ macdCrossover: "bearish", macdHistogramTrend: "contracting" }),
+			gate,
+		);
+		expect(result.passed).toBe(false);
+		expect(result.reasons).toContain("macd_bearish_contracting");
+	});
+
+	test("passes when MACD bearish but requireBullishMacd is false (default)", () => {
+		const result = evaluateGate(
+			makeIndicators({ macdCrossover: "bearish", macdHistogramTrend: "contracting" }),
+			DEFAULT_GATE,
+		);
+		expect(result.passed).toBe(true);
+	});
+
+	test("fails when bollingerPercentB exceeds max in weak trend", () => {
+		const gate: MomentumGateConfig = {
+			...DEFAULT_GATE,
+			maxBollingerPercentB: 0.9,
+		};
+		const result = evaluateGate(
+			makeIndicators({ bollingerPercentB: 0.95, trendAlignment: "up" }),
+			gate,
+		);
+		expect(result.passed).toBe(false);
+		expect(result.reasons).toContain("bollinger_overextended");
+	});
+
+	test("passes when bollingerPercentB exceeds max in strong_up trend (riding the band)", () => {
+		const gate: MomentumGateConfig = {
+			...DEFAULT_GATE,
+			maxBollingerPercentB: 0.9,
+		};
+		const result = evaluateGate(
+			makeIndicators({ bollingerPercentB: 0.95, trendAlignment: "strong_up" }),
+			gate,
+		);
+		expect(result.passed).toBe(true);
+	});
+
+	test("signalState includes adx14, adxTrend, and macdHistogramTrend", () => {
+		const indicators = makeIndicators({
+			adx14: 35,
+			adxTrend: "trending",
+			macdHistogramTrend: "expanding",
+		});
+		const result = evaluateGate(indicators, DEFAULT_GATE);
+		expect(result.signalState.adx14).toBe(35);
+		expect(result.signalState.adxTrend).toBe("trending");
+		expect(result.signalState.macdHistogramTrend).toBe("expanding");
+	});
+
 	test("signal state captures key indicator values", () => {
 		const indicators = makeIndicators({ rsi14: 55, volumeRatio: 1.1 });
 		const result = evaluateGate(indicators, DEFAULT_GATE);

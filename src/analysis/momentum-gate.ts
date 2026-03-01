@@ -5,6 +5,8 @@ export interface MomentumGateConfig {
 	rsiRange: readonly [number, number];
 	minVolumeRatio: number;
 	excludeOverbought: boolean;
+	requireBullishMacd?: boolean;
+	maxBollingerPercentB?: number | null;
 }
 
 export interface GateResult {
@@ -49,6 +51,25 @@ export function evaluateGate(
 		passed = false;
 	}
 
+	if (
+		gate.requireBullishMacd &&
+		indicators.macdCrossover === "bearish" &&
+		indicators.macdHistogramTrend === "contracting"
+	) {
+		reasons.push("macd_bearish_contracting");
+		passed = false;
+	}
+
+	if (
+		gate.maxBollingerPercentB != null &&
+		indicators.bollingerPercentB !== null &&
+		indicators.bollingerPercentB > gate.maxBollingerPercentB &&
+		indicators.trendAlignment !== "strong_up"
+	) {
+		reasons.push("bollinger_overextended");
+		passed = false;
+	}
+
 	if (passed) {
 		reasons.push("all_gates_passed");
 	}
@@ -62,8 +83,11 @@ export function evaluateGate(
 			rsiRegime: indicators.rsiRegime,
 			volumeRatio: indicators.volumeRatio,
 			macdCrossover: indicators.macdCrossover,
+			macdHistogramTrend: indicators.macdHistogramTrend,
 			atrPercent: indicators.atrPercent,
 			bollingerPercentB: indicators.bollingerPercentB,
+			adx14: indicators.adx14,
+			adxTrend: indicators.adxTrend,
 		},
 	};
 }
@@ -78,6 +102,8 @@ export function loadGateConfig(): MomentumGateConfig {
 			rsiRange: [45, 75],
 			minVolumeRatio: 0.8,
 			excludeOverbought: true,
+			requireBullishMacd: false,
+			maxBollingerPercentB: null,
 		};
 	}
 }
