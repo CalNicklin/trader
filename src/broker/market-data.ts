@@ -1,6 +1,6 @@
 import { BarSizeSetting, IBApiTickType } from "@stoqey/ib";
 import { getFMPQuotes } from "../research/sources/fmp.ts";
-import { getYahooQuote } from "../research/sources/yahoo-finance.ts";
+import { getYahooHistoricalBars, getYahooQuote } from "../research/sources/yahoo-finance.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { getApi } from "./connection.ts";
 import { type Exchange, getContract } from "./contracts.ts";
@@ -166,33 +166,43 @@ export interface HistoricalBar {
 	volume: number;
 }
 
-/** Get historical daily bars */
+/** Get historical daily bars. Priority: IBKR → Yahoo Finance */
 export async function getHistoricalBars(
 	symbol: string,
 	duration: string = "1 M",
 	barSize: BarSizeSetting = BarSizeSetting.DAYS_ONE,
 	exchange: Exchange = "LSE",
 ): Promise<HistoricalBar[]> {
-	const api = getApi();
-	const contract = getContract(symbol, exchange);
+	try {
+		const api = getApi();
+		const contract = getContract(symbol, exchange);
 
-	const TIMEOUT_MS = 15_000;
-	const bars = await Promise.race([
-		api.getHistoricalData(contract, "", duration, barSize, "TRADES", 1, 1),
-		new Promise<never>((_, reject) =>
-			setTimeout(
-				() => reject(new Error(`Historical bars timeout for ${symbol} after ${TIMEOUT_MS}ms`)),
-				TIMEOUT_MS,
+		const TIMEOUT_MS = 15_000;
+		const bars = await Promise.race([
+			api.getHistoricalData(contract, "", duration, barSize, "TRADES", 1, 1),
+			new Promise<never>((_, reject) =>
+				setTimeout(
+					() => reject(new Error(`Historical bars timeout for ${symbol} after ${TIMEOUT_MS}ms`)),
+					TIMEOUT_MS,
+				),
 			),
-		),
-	]);
+		]);
 
-	return bars.map((bar) => ({
-		time: bar.time ?? "",
-		open: bar.open ?? 0,
-		high: bar.high ?? 0,
-		low: bar.low ?? 0,
-		close: bar.close ?? 0,
-		volume: bar.volume ?? 0,
-	}));
+		return bars.map((bar) => ({
+			time: bar.time ?? "",
+			open: bar.open ?? 0,
+			high: bar.high ?? 0,
+			low: bar.low ?? 0,
+			close: bar.close ?? 0,
+			volume: bar.volume ?? 0,
+		}));
+	} catch {
+		log.info({ symbol, exchange, duration }, "IBKR historical bars failed, trying Yahoo Finance");
+		const yahooBars = await getYahooHistoricalBars(symbol, duration, exchange);
+		if (yahooBars.length > 0) {
+			log.info({ symbol, exchange, bars: yahooBars.length }, "Yahoo fallback historical bars");
+			return yahooBars;
+		}
+		throw new Error(`No historical bars for ${symbol} (IBKR and Yahoo both failed)`);
+	}
 }

@@ -143,4 +143,48 @@ export async function getYahooFundamentals(
 	}
 }
 
+export interface YahooHistoricalBar {
+	time: string;
+	open: number;
+	high: number;
+	low: number;
+	close: number;
+	volume: number;
+}
+
+/** Get historical daily bars from Yahoo Finance. Duration string like "1 M" or "3 M". */
+export async function getYahooHistoricalBars(
+	symbol: string,
+	duration: string = "1 M",
+	exchange: Exchange = "LSE",
+): Promise<YahooHistoricalBar[]> {
+	const yahooSymbol = toYahooSymbol(symbol, exchange);
+
+	const months = duration.includes("M") ? Number.parseInt(duration, 10) || 1 : 1;
+	const period1 = new Date();
+	period1.setMonth(period1.getMonth() - months);
+
+	const results = await yf.historical(yahooSymbol, {
+		period1: period1.toISOString().split("T")[0]!,
+	});
+
+	return results.map(
+		(bar: {
+			date: Date;
+			open: number;
+			high: number;
+			low: number;
+			close: number;
+			volume: number;
+		}) => ({
+			time: bar.date.toISOString().split("T")[0]!,
+			open: bar.open,
+			high: bar.high,
+			low: bar.low,
+			close: bar.close,
+			volume: bar.volume,
+		}),
+	);
+}
+
 /** @deprecated Use screenLSEStocks() from lse-screener.ts instead */
