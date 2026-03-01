@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
-import { computeIndicators } from "../analysis/indicators.ts";
+import { computeIndicators, formatIndicatorSummary } from "../analysis/indicators.ts";
 import type { Exchange } from "../broker/contracts.ts";
 import { getHistoricalBars } from "../broker/market-data.ts";
 import { getConfig } from "../config.ts";
@@ -349,6 +349,7 @@ export async function researchSymbol(
 			newsCount: newsItems.length,
 			dataQuality,
 			changePercentage: quote?.changePercent ?? 0,
+			indicatorSummary: indicators ? formatIndicatorSummary(indicators) : null,
 			quality_pass: analysis.quality_pass ?? null,
 			quality_flags: analysis.quality_flags ?? [],
 			catalyst: analysis.catalyst ?? null,

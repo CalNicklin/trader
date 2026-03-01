@@ -94,7 +94,16 @@
   - Enriched `formatIndicatorSummary()` with 52w range position (0-100%) and momentum verdict line
   - Tests: 6 new tests in `tests/indicators.test.ts` (classifyMomentumVerdict describe block)
 
-## Current layer: L2 (analyzer prompt + pipeline rawData)
+- **[analyzer-prompt]** Hardened ANALYSIS_BASE in `src/research/analyzer.ts`
+  - Added 2 new HARD RULES: momentum verdict override prevention, death cross / building momentum mutual exclusivity
+  - Added CONSISTENCY CHECK section: 4-point verification the model must perform before finalizing
+  - Vocabulary constraint: momentum terms only (breakout/continuation/exhaustion/reversal), not value-investing terms
+
+- **[pipeline-rawdata]** Fixed eval/production parity gap
+  - `src/research/pipeline.ts`: persists `indicatorSummary` in rawData so future eval tasks include pre-computed indicators
+  - `src/evals/suites/research.ts`: extracts `indicatorSummary` from rawData and appends as `Technical Indicators:` line, matching production behavior
+
+## Current layer: L3 (verification + eval run)
 
 ## Decisions
 

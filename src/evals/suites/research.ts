@@ -16,8 +16,14 @@ async function runResearchTrial(task: EvalTask): Promise<EvalTrial> {
 			? task.input.rawData
 			: JSON.stringify(task.input.rawData);
 
+	const rawObj =
+		typeof task.input.rawData === "object" ? (task.input.rawData as Record<string, unknown>) : null;
+	const indicatorSummary = rawObj?.indicatorSummary;
+	const indicatorLine =
+		typeof indicatorSummary === "string" ? `\nTechnical Indicators: ${indicatorSummary}` : "";
+
 	const symbol = typeof task.input.symbol === "string" ? task.input.symbol : "UNKNOWN";
-	const userPrompt = `Analyze ${symbol} based on this data:\n\n${rawData}\n\nProvide your analysis as JSON.`;
+	const userPrompt = `Analyze ${symbol} based on this data:\n\n${rawData}${indicatorLine}\n\nProvide your analysis as JSON.`;
 
 	const start = performance.now();
 	const response = await client.messages.create({

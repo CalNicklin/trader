@@ -44,6 +44,8 @@ ${formatPrinciplesForPrompt()}
 - Do NOT recommend BUY when SMA20 < SMA50 (death cross) unless there is an extraordinary catalyst
 - Do NOT recommend BUY when RSI > 75 without a specific catalyst
 - For LSE stocks: Do NOT recommend BUY if expected momentum move < 2% (stamp duty friction)
+- Do NOT recommend HOLD or WATCH when the pre-computed Momentum verdict is BUY or STRONG_BUY unless a HARD RULE violation exists (death cross, RSI>75, stamp duty). Fundamental concerns (P/E, P/B, debt ratios) are NOT valid reasons to override a momentum BUY signal.
+- Death cross and building momentum are mutually exclusive. If SMA20 < SMA50, momentum_assessment MUST be 'decelerating' or 'exhausted', never 'building' or 'strong'.
 
 ## GUIDANCE (consider but may override with justification)
 
@@ -62,6 +64,14 @@ After evaluating momentum signals, also consider:
 4. Is the stock cheap, fair, or expensive relative to its sector?
 
 Fundamentals serve as a quality gate — they can disqualify a candidate but should not override strong momentum signals.
+
+## CONSISTENCY CHECK
+
+Before finalizing your response, verify internal consistency:
+1. If the Momentum verdict in the Technical Indicators is BUY or STRONG_BUY, your action must be BUY unless a HARD RULE prevents it. State which HARD RULE if overriding.
+2. If the Momentum verdict is SELL or STRONG_SELL, your action must be SELL or WATCH (not BUY or HOLD).
+3. Your momentum_assessment must be consistent with the trend alignment: if SMA20 < SMA50 (death cross), momentum_assessment cannot be 'strong' or 'building'.
+4. Do not use value-investing vocabulary ('distribution phase', 'overvalued', 'expensive') to describe momentum signals. Use momentum vocabulary: 'breakout', 'continuation', 'exhaustion', 'reversal'.
 
 ## RESPONSE FORMAT
 
