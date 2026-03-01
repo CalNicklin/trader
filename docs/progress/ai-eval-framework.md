@@ -23,8 +23,13 @@
 - [suite-research] `researchSuite` in `src/evals/suites/research.ts` — code + LLM graders, Sonnet trial runner
 - [suite-news-discovery] `newsDiscoverySuite` in `src/evals/suites/news-discovery.ts` — code grader only, Haiku, 1 regression trial
 
-## Current layer: L5
-## Next todo: seed-quick-scan
+- [seed-quick-scan] `loadQuickScanTasks()` in `src/evals/tasks/seed-from-prod.ts` — queries agent_logs for haiku_no_escalate/escalation, derives scan flags, reconstructs context from surrounding logs
+- [seed-trading-analyst] `loadTradingAnalystTasks()` in `src/evals/tasks/seed-from-prod.ts` — queries DECISION entries, cross-refs escalation_state for conclusion
+- [seed-research] `loadResearchTasks()` in `src/evals/tasks/seed-from-prod.ts` — queries research table with rawData, joins watchlist for exchange
+- [seed-news] `loadNewsDiscoveryTasks()` in `src/evals/tasks/seed-from-prod.ts` — queries agent_logs with phase='news_discovery'
+
+## Current layer: L6
+## Next todo: outcome-trading-analyst
 
 ## Decisions
 
