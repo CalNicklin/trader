@@ -229,7 +229,8 @@ export const toolDefinitions: Anthropic.Tool[] = [
 	},
 	{
 		name: "log_decision",
-		description: "Log a decision or observation to the agent audit trail",
+		description:
+			"Log a decision or observation to the agent audit trail. Keep entries concise (under 100 words). Focus on the specific decision and rationale, not general rules.",
 		input_schema: {
 			type: "object" as const,
 			properties: {

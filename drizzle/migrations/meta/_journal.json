@@ -50,6 +50,13 @@
       "when": 1772053378776,
       "tag": "0006_lowly_rick_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1772374859693,
+      "tag": "0007_crazy_banshee",
+      "breakpoints": true
     }
   ]
 }

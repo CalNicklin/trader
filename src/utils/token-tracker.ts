@@ -9,12 +9,15 @@ export async function recordUsage(
 	outputTokens: number,
 	cacheCreationTokens?: number,
 	cacheReadTokens?: number,
+	status?: string,
 ): Promise<void> {
 	const db = getDb();
 	await db.insert(tokenUsage).values({
 		job,
 		inputTokens,
 		outputTokens,
+		cacheCreationTokens: cacheCreationTokens ?? null,
+		cacheReadTokens: cacheReadTokens ?? null,
 		estimatedCostUsd: estimateCost(
 			job,
 			inputTokens,
@@ -22,6 +25,7 @@ export async function recordUsage(
 			cacheCreationTokens,
 			cacheReadTokens,
 		),
+		status: status ?? null,
 	});
 }
 

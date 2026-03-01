@@ -18,7 +18,8 @@ export type JobName =
 	| "decision_scorer"
 	| "mid_week_analysis"
 	| "end_of_week_analysis"
-	| "heartbeat";
+	| "heartbeat"
+	| "cost_evals";
 
 const BROKER_JOBS: ReadonlySet<JobName> = new Set([
 	"orchestrator_tick",
@@ -131,6 +132,12 @@ async function executeJob(name: JobName): Promise<void> {
 				subject: `Heartbeat: Trader Agent alive — uptime ${uptimeHrs}h`,
 				html: `<p>Trader Agent is running.</p><p>Hostname: ${hostname}<br>Uptime: ${uptimeHrs} hours<br>Time: ${new Date().toISOString()}</p>`,
 			});
+			break;
+		}
+
+		case "cost_evals": {
+			const { runCostEvals } = await import("../evals/cost-evals.ts");
+			await runCostEvals();
 			break;
 		}
 	}

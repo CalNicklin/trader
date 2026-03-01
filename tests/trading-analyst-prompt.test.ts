@@ -33,3 +33,20 @@ describe("trading analyst prompt adapts to paper mode", () => {
 		expect(prompt).not.toContain("genuine conviction beyond");
 	});
 });
+
+describe("output budget constraints", () => {
+	test("system prompt constrains total response length", () => {
+		const prompt = getTradingAnalystSystem();
+		expect(prompt).toContain("under 300 words");
+	});
+
+	test("system prompt constrains log_decision length", () => {
+		const prompt = getTradingAnalystSystem();
+		expect(prompt).toContain("100 words");
+	});
+
+	test("system prompt discourages repeating ISA rules", () => {
+		const prompt = getTradingAnalystSystem();
+		expect(prompt).toContain("Do NOT repeat ISA compliance rules");
+	});
+});

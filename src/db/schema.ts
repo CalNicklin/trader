@@ -191,7 +191,10 @@ export const tokenUsage = sqliteTable("token_usage", {
 	job: text("job").notNull(),
 	inputTokens: integer("input_tokens").notNull(),
 	outputTokens: integer("output_tokens").notNull(),
+	cacheCreationTokens: integer("cache_creation_tokens"),
+	cacheReadTokens: integer("cache_read_tokens"),
 	estimatedCostUsd: real("estimated_cost_usd").notNull(),
+	status: text("status"),
 	createdAt: text("created_at")
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
@@ -267,6 +270,15 @@ export const improvementProposals = sqliteTable("improvement_proposals", {
 	})
 		.notNull()
 		.default("PROPOSED"),
+	createdAt: text("created_at")
+		.notNull()
+		.$defaultFn(() => new Date().toISOString()),
+});
+
+export const escalationState = sqliteTable("escalation_state", {
+	id: integer("id").primaryKey({ autoIncrement: true }),
+	fingerprint: text("fingerprint").notNull(),
+	conclusion: text("conclusion").notNull(),
 	createdAt: text("created_at")
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),

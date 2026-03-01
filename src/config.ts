@@ -39,6 +39,12 @@ const envSchema = z.object({
 
 	// FMP (Financial Modeling Prep) API
 	FMP_API_KEY: z.string().optional(),
+
+	// Cost control
+	ESCALATION_COOLDOWN_MIN: z.coerce.number().default(20),
+	MATERIAL_CHANGE_PCT: z.coerce.number().default(2),
+	DAILY_API_BUDGET_USD: z.coerce.number().default(3.0),
+	MAX_AGENT_ITERATIONS: z.coerce.number().default(5),
 });
 
 export type Config = z.infer<typeof envSchema>;

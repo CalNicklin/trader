@@ -5,13 +5,23 @@ import { getAccountSummary, getPositions as getBrokerPositions } from "../broker
 import type { Exchange } from "../broker/contracts.ts";
 import type { Quote } from "../broker/market-data.ts";
 import { getQuotesGroupedByExchange } from "../broker/market-data.ts";
+import { detectPhantomPositions } from "../broker/phantom-detection.ts";
+import { getConfig } from "../config.ts";
 import { getDb } from "../db/client.ts";
 import { agentLogs, dailySnapshots, positions, research, trades, watchlist } from "../db/schema.ts";
 import { buildLearningBrief, buildRecentContext } from "../learning/context-builder.ts";
+import { canAffordSonnet } from "../utils/budget.ts";
 import { getMarketPhase } from "../utils/clock.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { withRetry } from "../utils/retry.ts";
 import { buildContextEnrichments } from "./context-enrichments.ts";
+import {
+	computeFingerprint,
+	type EscalationConclusion,
+	getLastEscalation,
+	recordEscalation,
+} from "./escalation-state.ts";
+import { evaluateCooldownGate, evaluatePostHaikuGates } from "./gate-evaluator.ts";
 import { checkIntentions, clearAllIntentions } from "./intentions.ts";
 import { runQuickScan, runTradingAnalyst } from "./planner.ts";
 import { DAY_PLAN_PROMPT, getMiniAnalysisPrompt } from "./prompts/trading-analyst.ts";
@@ -248,6 +258,26 @@ async function shouldRunAnalysis(): Promise<MarketState> {
 	return { reasons, quotes };
 }
 
+async function logSkip(
+	reason: import("./gate-evaluator.ts").SkipReason,
+	detail: string,
+): Promise<void> {
+	log.info({ reason, detail }, "Tick skipped");
+	const db = getDb();
+	await db.insert(agentLogs).values({
+		level: "INFO",
+		phase: "trading",
+		message: `Skip [${reason}]: ${detail}`,
+		data: JSON.stringify({ type: "escalation_skip", reason }),
+	});
+}
+
+/** Determine conclusion from agent response (did it act or just hold?) */
+function inferConclusion(toolCalls: ReadonlyArray<{ name: string }>): EscalationConclusion {
+	const actedTools = new Set(["place_trade", "cancel_order"]);
+	return toolCalls.some((tc) => actedTools.has(tc.name)) ? "acted" : "hold";
+}
+
 /** Active trading tick: three-tier analysis (pre-filter -> Haiku -> Sonnet) */
 async function onActiveTradingTick(): Promise<void> {
 	try {
@@ -327,6 +357,31 @@ async function onActiveTradingTick(): Promise<void> {
 			.from(trades)
 			.where(eq(trades.status, "SUBMITTED"));
 
+		// === Gate 1: Cooldown check (before Haiku) ===
+		const config = getConfig();
+		const lastEscalation = getLastEscalation();
+
+		const currentQuotePrices = new Map<string, number>();
+		for (const [sym, q] of preFilter.quotes) {
+			if (q.last) currentQuotePrices.set(sym, q.last);
+		}
+
+		const cooldownResult = evaluateCooldownGate({
+			lastEscalation,
+			cooldownMin: config.ESCALATION_COOLDOWN_MIN,
+			materialChangePct: config.MATERIAL_CHANGE_PCT,
+			positionRows,
+			lastQuotes,
+			currentQuotes: currentQuotePrices,
+		});
+		if (!cooldownResult.proceed) {
+			await logSkip(cooldownResult.skipReason, cooldownResult.detail);
+			return;
+		}
+		if (lastEscalation && lastEscalation.conclusion === "hold") {
+			log.info("Material change detected — overriding cooldown");
+		}
+
 		// === Tier 2: Momentum gate evaluation ===
 		const gateConfig = loadGateConfig();
 		const gatePassedSummaries: string[] = [];
@@ -395,17 +450,27 @@ Watchlist top scores: ${watchlistItems
 			.join(", ")}
 Gate-qualified candidates (${gatePassCount}): ${gatePassedSummaries.length > 0 ? gatePassedSummaries.join("; ") : "None"}${lastDecisionContext}`;
 
-		// Haiku quick scan (still determines escalation based on full picture)
+		// Haiku quick scan — always runs when cooldown allows (risk triage at negligible cost)
 		const scan = await runQuickScan(scanContext);
 
-		if (!scan.escalate) {
-			log.info({ reason: scan.reason }, "Haiku scan: no escalation needed");
-			const dbForLog = getDb();
-			await dbForLog.insert(agentLogs).values({
-				level: "INFO",
-				phase: "trading",
-				message: `Quick scan: ${scan.reason}`,
-			});
+		// === Gates 2-4: Haiku → Budget → State-hash ===
+		const fingerprint = computeFingerprint({
+			positions: positionRows.map((p) => ({ symbol: p.symbol, quantity: p.quantity })),
+			pendingOrderIds: pendingOrders.map((o) => o.id),
+			researchSignals: recentResearch.map((r) => ({ symbol: r.symbol, action: r.action })),
+			quotes: preFilter.quotes,
+		});
+
+		const budgetOk = await canAffordSonnet();
+
+		const postHaikuResult = evaluatePostHaikuGates({
+			haikuEscalated: scan.escalate,
+			canAffordSonnet: budgetOk,
+			fingerprint,
+			lastEscalation,
+		});
+		if (!postHaikuResult.proceed) {
+			await logSkip(postHaikuResult.skipReason, postHaikuResult.detail);
 			return;
 		}
 
@@ -484,12 +549,15 @@ Escalation reason: ${scan.reason}
 		const response = await runTradingAnalyst(`${getMiniAnalysisPrompt()}\n\n${fullContext}`);
 		lastAgentResponse = response.text;
 
+		// Record escalation state for future gate checks
+		const conclusion = inferConclusion(response.toolCalls);
+		await recordEscalation(fingerprint, conclusion);
+
 		// Log decision with quote data for the decision scorer (Phase 3)
 		const quoteSnapshot: Record<string, number> = {};
 		for (const [symbol, quote] of preFilter.quotes) {
 			if (quote.last) quoteSnapshot[symbol] = quote.last;
 		}
-		// Also include position quotes
 		for (const pos of positionRows) {
 			if (pos.currentPrice) quoteSnapshot[pos.symbol] = pos.currentPrice;
 		}
@@ -594,6 +662,30 @@ async function reconcilePositions(): Promise<void> {
 	}
 
 	log.info({ broker: brokerPositions.length, db: dbPositions.length }, "Positions reconciled");
+
+	// Detect and correct phantom positions (negative qty impossible in ISA)
+	const currentPositions = await db.select().from(positions);
+	const phantoms = detectPhantomPositions(currentPositions);
+	for (const phantom of phantoms) {
+		log.warn(
+			{ symbol: phantom.symbol, quantity: phantom.quantity },
+			"Phantom position detected: ISA accounts cannot hold short positions",
+		);
+		await db
+			.update(positions)
+			.set({
+				quantity: 0,
+				marketValue: null,
+				unrealizedPnl: null,
+				updatedAt: new Date().toISOString(),
+			})
+			.where(eq(positions.id, phantom.id));
+		await db.insert(agentLogs).values({
+			level: "WARN",
+			phase: "trading",
+			message: `Phantom position corrected: ${phantom.symbol} qty=${phantom.quantity} → 0`,
+		});
+	}
 }
 
 /** Record end-of-day portfolio snapshot */

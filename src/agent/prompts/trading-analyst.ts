@@ -90,6 +90,12 @@ You have access to these tools — use them proactively:
 - **log_decision**: Record observations to audit trail
 - **log_intention**: Record a conditional plan for future ticks
 
+## Output Budget
+- Keep your total response under 300 words
+- log_decision entries: max 100 words each — focus on the specific decision and rationale
+- Do NOT repeat ISA compliance rules — they are already enforced by the system
+- One-line rationale per symbol unless you are taking action
+
 ## Learning From Experience
 You receive a learning brief with insights from recent trade analysis.
 Treat [CRITICAL] and [WARNING] items as hard constraints.

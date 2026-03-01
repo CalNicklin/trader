@@ -14,7 +14,7 @@ let _client: Anthropic | null = null;
 
 function getClient(): Anthropic {
 	if (!_client) {
-		_client = new Anthropic({ apiKey: getConfig().ANTHROPIC_API_KEY });
+		_client = new Anthropic({ apiKey: getConfig().ANTHROPIC_API_KEY, maxRetries: 1 });
 	}
 	return _client;
 }
@@ -74,9 +74,10 @@ export async function runQuickScan(context: string): Promise<QuickScanResult> {
 /** Run the trading analyst agent with tool use */
 export async function runTradingAnalyst(
 	userMessage: string,
-	maxIterations: number = 10,
+	maxIterations?: number,
 ): Promise<AgentResponse> {
-	return runAgent(getTradingAnalystSystem(), userMessage, toolDefinitions, maxIterations);
+	const iterations = maxIterations ?? getConfig().MAX_AGENT_ITERATIONS;
+	return runAgent(getTradingAnalystSystem(), userMessage, toolDefinitions, iterations);
 }
 
 /** Core agent loop with tool use */
@@ -93,6 +94,7 @@ async function runAgent(
 	let totalOutputTokens = 0;
 	let totalCacheCreationTokens = 0;
 	let totalCacheReadTokens = 0;
+	let sessionStatus: "complete" | "max_iterations" | "error" = "error";
 
 	// Set up prompt caching: mark system prompt and last tool for caching
 	const system: Anthropic.TextBlockParam[] = [
@@ -114,107 +116,107 @@ async function runAgent(
 
 	const messages: Anthropic.MessageParam[] = [{ role: "user", content: userMessage }];
 
-	for (let i = 0; i < maxIterations; i++) {
-		const response = await client.messages.create({
-			model: config.CLAUDE_MODEL,
-			max_tokens: 4096,
-			cache_control: { type: "ephemeral" },
-			system,
-			tools: cachedTools,
-			messages,
-		});
-
-		totalInputTokens += response.usage.input_tokens;
-		totalOutputTokens += response.usage.output_tokens;
-		totalCacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
-		totalCacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
-
-		// Check if we need to process tool calls
-		if (response.stop_reason === "tool_use") {
-			const assistantContent = response.content;
-			messages.push({ role: "assistant", content: assistantContent });
-
-			const toolResults: Anthropic.ToolResultBlockParam[] = [];
-
-			for (const block of assistantContent) {
-				if (block.type === "tool_use") {
-					log.info({ tool: block.name, input: block.input }, "Agent calling tool");
-
-					// Log to DB
-					const db = getDb();
-					await db.insert(agentLogs).values({
-						level: "ACTION",
-						phase: "trading",
-						message: `Tool call: ${block.name}`,
-						data: JSON.stringify(block.input),
-					});
-
-					const result = await executeTool(block.name, block.input as Record<string, unknown>);
-					allToolCalls.push({
-						name: block.name,
-						input: block.input as Record<string, unknown>,
-						result,
-					});
-
-					toolResults.push({
-						type: "tool_result",
-						tool_use_id: block.id,
-						content: result,
-					});
-				}
-			}
-
-			messages.push({ role: "user", content: toolResults });
-		} else {
-			// Final response - extract text
-			const textBlocks = response.content
-				.filter((b): b is Anthropic.TextBlock => b.type === "text")
-				.map((b) => b.text);
-
-			const responseText = textBlocks.join("\n");
-
-			// Log the final decision
-			const db = getDb();
-			await db.insert(agentLogs).values({
-				level: "DECISION",
-				phase: "trading",
-				message: responseText.substring(0, 500),
-				data: JSON.stringify({
-					tokensUsed: { input: totalInputTokens, output: totalOutputTokens },
-				}),
+	try {
+		for (let i = 0; i < maxIterations; i++) {
+			const response = await client.messages.create({
+				model: config.CLAUDE_MODEL,
+				max_tokens: 4096,
+				cache_control: { type: "ephemeral" },
+				system,
+				tools: cachedTools,
+				messages,
 			});
 
-			log.info(
-				{
-					iterations: i + 1,
-					toolCalls: allToolCalls.length,
-					tokens: totalInputTokens + totalOutputTokens,
-					cacheRead: totalCacheReadTokens,
-				},
-				"Agent completed",
-			);
+			totalInputTokens += response.usage.input_tokens;
+			totalOutputTokens += response.usage.output_tokens;
+			totalCacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
+			totalCacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
 
-			await recordUsage(
-				"trading_analyst",
-				totalInputTokens,
-				totalOutputTokens,
-				totalCacheCreationTokens,
-				totalCacheReadTokens,
-			);
+			if (response.stop_reason === "tool_use") {
+				const assistantContent = response.content;
+				messages.push({ role: "assistant", content: assistantContent });
 
-			return {
-				text: responseText,
-				toolCalls: allToolCalls,
-				tokensUsed: { input: totalInputTokens, output: totalOutputTokens },
-			};
+				const toolResults: Anthropic.ToolResultBlockParam[] = [];
+
+				for (const block of assistantContent) {
+					if (block.type === "tool_use") {
+						log.info({ tool: block.name, input: block.input }, "Agent calling tool");
+
+						const db = getDb();
+						await db.insert(agentLogs).values({
+							level: "ACTION",
+							phase: "trading",
+							message: `Tool call: ${block.name}`,
+							data: JSON.stringify(block.input),
+						});
+
+						const result = await executeTool(block.name, block.input as Record<string, unknown>);
+						allToolCalls.push({
+							name: block.name,
+							input: block.input as Record<string, unknown>,
+							result,
+						});
+
+						toolResults.push({
+							type: "tool_result",
+							tool_use_id: block.id,
+							content: result,
+						});
+					}
+				}
+
+				messages.push({ role: "user", content: toolResults });
+			} else {
+				const textBlocks = response.content
+					.filter((b): b is Anthropic.TextBlock => b.type === "text")
+					.map((b) => b.text);
+
+				const responseText = textBlocks.join("\n");
+
+				const db = getDb();
+				await db.insert(agentLogs).values({
+					level: "DECISION",
+					phase: "trading",
+					message: responseText.substring(0, 500),
+					data: JSON.stringify({
+						tokensUsed: { input: totalInputTokens, output: totalOutputTokens },
+					}),
+				});
+
+				log.info(
+					{
+						iterations: i + 1,
+						toolCalls: allToolCalls.length,
+						tokens: totalInputTokens + totalOutputTokens,
+						cacheRead: totalCacheReadTokens,
+					},
+					"Agent completed",
+				);
+
+				sessionStatus = "complete";
+				return {
+					text: responseText,
+					toolCalls: allToolCalls,
+					tokensUsed: { input: totalInputTokens, output: totalOutputTokens },
+				};
+			}
 		}
-	}
 
-	// Hit max iterations
-	log.warn({ maxIterations }, "Agent hit max iterations");
-	return {
-		text: "Max iterations reached without final response",
-		toolCalls: allToolCalls,
-		tokensUsed: { input: totalInputTokens, output: totalOutputTokens },
-	};
+		log.warn({ maxIterations }, "Agent hit max iterations");
+		sessionStatus = "max_iterations";
+		return {
+			text: "Max iterations reached without final response",
+			toolCalls: allToolCalls,
+			tokensUsed: { input: totalInputTokens, output: totalOutputTokens },
+		};
+	} finally {
+		await recordUsage(
+			"trading_analyst",
+			totalInputTokens,
+			totalOutputTokens,
+			totalCacheCreationTokens,
+			totalCacheReadTokens,
+			sessionStatus,
+		).catch((err) => log.error({ err }, "Failed to record usage"));
+	}
 }
