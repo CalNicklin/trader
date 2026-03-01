@@ -52,9 +52,37 @@
   - Added "Your reason must be under 200 characters." to QUICK_SCAN_BASE prompt
   - Primary fix for Quick Scan eval: 17/20 failures were solely due to reason length
 
-## Current layer: L4
+- **[verify]** Final verification and eval run complete
 
-## Next todo: verify
+## Eval Results (2026-03-01, Run 4 — post momentum refinement)
+
+| Suite | Baseline | Target | Result | Delta |
+|---|---|---|---|---|
+| Quick Scan | 15% | >80% | **80%** | +65pp |
+| Trading Analyst | 14% | >60% | **17%** | +3pp |
+| Research | 40% | >75% | **67%** | +27pp |
+| News Discovery | 100% | maintain | **100%** | 0 |
+
+### Quick Scan (80%, target met)
+- 16/20 pass. 3 failures are LLM judge "dangerous_miss" (agent doesn't escalate when gate-passing stocks exist). 1 failure is still reason length (210 chars).
+- The char limit fix resolved 16/17 original failures. Remaining failures are behavioral (not escalating on gate-passing stocks).
+
+### Research (67%, target not met but +27pp improvement)
+- 10/15 pass. 5 failures still show value-investing bias contaminating momentum decisions:
+  - res-141: Identifies "textbook momentum" then recommends HOLD citing valuation
+  - res-136: Acknowledges building momentum but lets debt ratios override
+  - res-135: Labels volume breakdown as "distribution" instead of SELL signal
+  - res-139: Contradicts itself with death cross + building momentum simultaneously
+  - res-138: Miscalculates price position in 52w range
+- The prompt rewrite eliminated 4 of the original 9 contradictory failures. Remaining 5 need further prompt iteration.
+
+### Trading Analyst (17%, target not met)
+- 1/6 pass. 5 failures are "analysis paralysis" — agent hits max iterations gathering data without executing decisions. This is NOT a momentum problem — it's a tool-use efficiency / iteration budget issue unrelated to this plan's scope.
+
+### News Discovery (100%, maintained)
+- 4/4 pass. No regression.
+
+## Current layer: complete
 
 ## Decisions
 
