@@ -103,7 +103,13 @@
   - `src/research/pipeline.ts`: persists `indicatorSummary` in rawData so future eval tasks include pre-computed indicators
   - `src/evals/suites/research.ts`: extracts `indicatorSummary` from rawData and appends as `Technical Indicators:` line, matching production behavior
 
-## Current layer: L3 (verification + eval run)
+## Current layer: L4 (eval run — blocked on deploy)
+
+All code changes complete. Eval run requires either:
+1. Deploy to server and trigger via `POST /jobs/ai_evals` with `suiteNames=["research"]`
+2. Pull DB snapshot locally (`bun run db:pull`) and run `bun -e "import {runAiEvals} from './src/evals/runner.ts'; await runAiEvals(['research'])"`
+
+Note: existing eval tasks in the DB won't have `indicatorSummary` in rawData (that field is only persisted for new research runs). The eval trial extracts it when available but falls back gracefully. Full benefit requires running the research pipeline first to populate new rawData, then re-running evals.
 
 ## Decisions
 
