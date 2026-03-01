@@ -164,25 +164,24 @@ export async function getYahooHistoricalBars(
 	const period1 = new Date();
 	period1.setMonth(period1.getMonth() - months);
 
-	const results = await yf.historical(yahooSymbol, {
-		period1: period1.toISOString().split("T")[0]!,
-	});
+	const period1Str = period1.toISOString().split("T")[0]!;
+	const result = await yf.chart(yahooSymbol, { period1: period1Str, interval: "1d" });
 
-	return results.map(
+	return result.quotes.map(
 		(bar: {
 			date: Date;
-			open: number;
-			high: number;
-			low: number;
-			close: number;
-			volume: number;
+			open: number | null;
+			high: number | null;
+			low: number | null;
+			close: number | null;
+			volume: number | null;
 		}) => ({
 			time: bar.date.toISOString().split("T")[0]!,
-			open: bar.open,
-			high: bar.high,
-			low: bar.low,
-			close: bar.close,
-			volume: bar.volume,
+			open: bar.open ?? 0,
+			high: bar.high ?? 0,
+			low: bar.low ?? 0,
+			close: bar.close ?? 0,
+			volume: bar.volume ?? 0,
 		}),
 	);
 }
