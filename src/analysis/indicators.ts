@@ -404,6 +404,98 @@ export async function getIndicatorsForSymbol(
 	}
 }
 
+export type MomentumVerdict = "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell";
+
+export interface MomentumVerdictResult {
+	readonly verdict: MomentumVerdict;
+	readonly signals: readonly string[];
+	readonly conflicts: readonly string[];
+}
+
+export function classifyMomentumVerdict(ind: TechnicalIndicators): MomentumVerdictResult {
+	const signals: string[] = [];
+	const conflicts: string[] = [];
+
+	const bullishTrend = ind.trendAlignment === "strong_up" || ind.trendAlignment === "up";
+	const bearishTrend = ind.trendAlignment === "strong_down" || ind.trendAlignment === "down";
+
+	if (bullishTrend) signals.push(`trend: ${ind.trendAlignment}`);
+	if (bearishTrend) signals.push(`trend: ${ind.trendAlignment}`);
+
+	if (ind.rsiRegime === "bullish") signals.push("RSI bullish (45-70)");
+	if (ind.rsiRegime === "overbought") signals.push("RSI overbought (>70)");
+	if (ind.rsiRegime === "bearish") signals.push("RSI bearish (30-45)");
+	if (ind.rsiRegime === "oversold") signals.push("RSI oversold (<30)");
+
+	if (ind.macdCrossover === "bullish") signals.push("MACD bullish crossover");
+	if (ind.macdCrossover === "bearish") signals.push("MACD bearish crossover");
+
+	if (ind.adxTrend === "strong") signals.push("ADX strong (>40)");
+	if (ind.adxTrend === "trending") signals.push("ADX trending (25-40)");
+
+	if (ind.volumeRatio !== null && ind.volumeRatio >= 0.8) signals.push("volume confirms");
+	if (ind.volumeRatio !== null && ind.volumeRatio < 0.8) conflicts.push("low volume (<0.8x avg)");
+
+	if (ind.macdHistogramTrend === "expanding") signals.push("MACD histogram expanding");
+	if (ind.macdHistogramTrend === "contracting") conflicts.push("MACD histogram contracting");
+
+	// Detect contradictions
+	if (bullishTrend && ind.rsiRegime === "overbought") {
+		conflicts.push("overbought RSI in uptrend — reversal risk");
+	}
+	if (bearishTrend && ind.rsiRegime === "oversold") {
+		conflicts.push("oversold RSI in downtrend — bounce risk");
+	}
+	if (bullishTrend && ind.macdCrossover === "bearish") {
+		conflicts.push("bearish MACD crossover contradicts uptrend");
+	}
+	if (bearishTrend && ind.macdCrossover === "bullish") {
+		conflicts.push("bullish MACD crossover contradicts downtrend");
+	}
+	if (bearishTrend && (ind.rsiRegime === "bullish" || ind.rsiRegime === "overbought")) {
+		conflicts.push("bullish RSI contradicts bearish trend");
+	}
+	if (bullishTrend && (ind.rsiRegime === "bearish" || ind.rsiRegime === "oversold")) {
+		conflicts.push("bearish RSI contradicts bullish trend");
+	}
+
+	let score = 0;
+
+	// Trend alignment is the primary signal (heaviest weight)
+	if (bullishTrend) score += ind.trendAlignment === "strong_up" ? 3 : 2;
+	if (bearishTrend) score -= ind.trendAlignment === "strong_down" ? 3 : 2;
+
+	// RSI contributes only when it aligns with or is neutral to trend
+	const rsiBullish = ind.rsiRegime === "bullish" || ind.rsiRegime === "overbought";
+	const rsiBearish = ind.rsiRegime === "bearish" || ind.rsiRegime === "oversold";
+	if (rsiBullish && !bearishTrend) score += ind.rsiRegime === "overbought" ? -0.5 : 1;
+	if (rsiBearish && !bullishTrend) score -= ind.rsiRegime === "oversold" ? -0.5 : 1;
+
+	// MACD crossover contributes only when aligned with trend
+	if (ind.macdCrossover === "bullish" && !bearishTrend) score += 1;
+	if (ind.macdCrossover === "bearish" && !bullishTrend) score -= 1;
+
+	// Weak ADX dampens conviction
+	if (ind.adxTrend === "weak") score *= 0.5;
+
+	// Volume confirmation
+	if (ind.volumeRatio !== null && ind.volumeRatio >= 0.8) score += Math.sign(score) * 0.5;
+	if (ind.volumeRatio !== null && ind.volumeRatio < 0.8) score *= 0.7;
+
+	// MACD histogram trend amplifies current direction
+	if (ind.macdHistogramTrend === "expanding") score += Math.sign(score) * 0.5;
+	if (ind.macdHistogramTrend === "contracting") score -= Math.sign(score) * 0.3;
+
+	let verdict: MomentumVerdict;
+	if (score >= 3.5) verdict = "strong_buy";
+	else if (score >= 1.5) verdict = "buy";
+	else if (score <= -3.5) verdict = "strong_sell";
+	else if (score <= -1.5) verdict = "sell";
+	else verdict = "neutral";
+
+	return { verdict, signals, conflicts };
+}
+
 export function formatIndicatorSummary(ind: TechnicalIndicators): string {
 	const parts: string[] = [`${ind.symbol}:`];
 
@@ -442,9 +534,21 @@ export function formatIndicatorSummary(ind: TechnicalIndicators): string {
 	if (ind.volumeRatio !== null) {
 		parts.push(`Volume: ${(ind.volumeRatio * 100).toFixed(0)}% of 20d avg`);
 	}
-	if (ind.distanceFromHigh52w !== null) {
+	if (ind.distanceFromHigh52w !== null && ind.distanceFromLow52w !== null) {
+		const rangePosition =
+			(ind.distanceFromLow52w / (ind.distanceFromLow52w + ind.distanceFromHigh52w)) * 100;
+		parts.push(
+			`52w range: ${rangePosition.toFixed(0)}% (${ind.distanceFromHigh52w.toFixed(1)}% below high)`,
+		);
+	} else if (ind.distanceFromHigh52w !== null) {
 		parts.push(`52w: ${ind.distanceFromHigh52w.toFixed(1)}% below high`);
 	}
+
+	const { verdict, signals, conflicts } = classifyMomentumVerdict(ind);
+	const verdictParts = [verdict.toUpperCase()];
+	if (signals.length > 0) verdictParts.push(`[${signals.join(", ")}]`);
+	if (conflicts.length > 0) verdictParts.push(`CONFLICTS: [${conflicts.join(", ")}]`);
+	parts.push(`Momentum: ${verdictParts.join(" ")}`);
 
 	return parts.join(" | ");
 }

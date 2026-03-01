@@ -82,7 +82,19 @@
 ### News Discovery (100%, maintained)
 - 4/4 pass. No regression.
 
-## Current layer: complete
+---
+
+## Research Eval Improvement (67% → 75%+ target)
+
+- **[indicators-verdict]** Added `classifyMomentumVerdict()` to `src/analysis/indicators.ts`
+  - Triangulates trend alignment, RSI, MACD crossover, ADX, volume, MACD histogram trend
+  - Produces `MomentumVerdictResult` with verdict (strong_buy/buy/neutral/sell/strong_sell), signals list, conflicts list
+  - Trend is primary signal (weight 2-3); contradicting indicators (e.g. bullish RSI in bearish trend) register as conflicts but don't offset trend
+  - Weak ADX dampens conviction; volume < 0.8x dampens score
+  - Enriched `formatIndicatorSummary()` with 52w range position (0-100%) and momentum verdict line
+  - Tests: 6 new tests in `tests/indicators.test.ts` (classifyMomentumVerdict describe block)
+
+## Current layer: L2 (analyzer prompt + pipeline rawData)
 
 ## Decisions
 

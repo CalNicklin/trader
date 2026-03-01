@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { computeIndicators, formatIndicatorSummary } from "../src/analysis/indicators.ts";
+import {
+	classifyMomentumVerdict,
+	computeIndicators,
+	formatIndicatorSummary,
+} from "../src/analysis/indicators.ts";
 import type { HistoricalBar } from "../src/broker/market-data.ts";
 
 function makeTrendingBars(count: number, basePrice = 100, dailyGain = 0.1): HistoricalBar[] {
@@ -248,6 +252,129 @@ describe("MACD histogram trend", () => {
 	});
 });
 
+describe("classifyMomentumVerdict", () => {
+	function makeIndicators(
+		overrides: Partial<ReturnType<typeof computeIndicators>>,
+	): ReturnType<typeof computeIndicators> {
+		return {
+			symbol: "TEST",
+			computed: new Date().toISOString(),
+			sma20: 100,
+			sma50: 95,
+			sma200: 85,
+			trendAlignment: "strong_up",
+			priceVsSma20Pct: 2,
+			priceVsSma50Pct: 7,
+			rsi14: 62,
+			rsiRegime: "bullish",
+			macdLine: 1.5,
+			macdSignal: 0.8,
+			macdHistogram: 0.7,
+			macdCrossover: "bullish",
+			adx14: 35,
+			adxTrend: "trending",
+			macdHistogramTrend: "expanding",
+			atr14: 2,
+			atrPercent: 2,
+			bollingerUpper: 110,
+			bollingerMiddle: 100,
+			bollingerLower: 90,
+			bollingerPercentB: 0.7,
+			volumeSma20: 100_000,
+			volumeRatio: 1.2,
+			volumeTrend: "increasing",
+			distanceFromHigh52w: 2,
+			distanceFromLow52w: 30,
+			...overrides,
+		};
+	}
+
+	test("strong_buy when all signals align: strong_up trend, bullish RSI, bullish MACD, good volume", () => {
+		const ind = makeIndicators({
+			trendAlignment: "strong_up",
+			rsiRegime: "bullish",
+			macdCrossover: "bullish",
+			adxTrend: "trending",
+			volumeRatio: 1.2,
+		});
+		const result = classifyMomentumVerdict(ind);
+		expect(result.verdict).toBe("strong_buy");
+		expect(result.signals.length).toBeGreaterThan(0);
+		expect(result.conflicts).toHaveLength(0);
+	});
+
+	test("sell on death cross (down trend) even with bullish RSI", () => {
+		const ind = makeIndicators({
+			trendAlignment: "down",
+			rsiRegime: "bullish",
+			macdCrossover: "none",
+			adxTrend: "trending",
+			volumeRatio: 1.0,
+		});
+		const result = classifyMomentumVerdict(ind);
+		expect(result.verdict).toBe("sell");
+		expect(result.conflicts.length).toBeGreaterThan(0);
+	});
+
+	test("strong_sell on strong_down trend with bearish MACD", () => {
+		const ind = makeIndicators({
+			trendAlignment: "strong_down",
+			rsiRegime: "bearish",
+			macdCrossover: "bearish",
+			adxTrend: "strong",
+			volumeRatio: 1.5,
+			macdHistogramTrend: "expanding",
+		});
+		const result = classifyMomentumVerdict(ind);
+		expect(result.verdict).toBe("strong_sell");
+	});
+
+	test("neutral when signals conflict: up trend but bearish MACD and low volume", () => {
+		const ind = makeIndicators({
+			trendAlignment: "up",
+			rsiRegime: "neutral",
+			macdCrossover: "bearish",
+			adxTrend: "weak",
+			volumeRatio: 0.5,
+			macdHistogramTrend: "contracting",
+		});
+		const result = classifyMomentumVerdict(ind);
+		expect(result.verdict).toBe("neutral");
+		expect(result.conflicts.length).toBeGreaterThan(0);
+	});
+
+	test("buy (not strong_buy) on up trend with neutral RSI and no MACD crossover", () => {
+		const ind = makeIndicators({
+			trendAlignment: "up",
+			rsiRegime: "neutral",
+			macdCrossover: "none",
+			adxTrend: "trending",
+			volumeRatio: 1.0,
+		});
+		const result = classifyMomentumVerdict(ind);
+		expect(result.verdict).toBe("buy");
+	});
+
+	test("neutral when all indicators are null/missing", () => {
+		const ind = makeIndicators({
+			trendAlignment: "neutral",
+			rsiRegime: null,
+			rsi14: null,
+			macdCrossover: "none",
+			macdLine: null,
+			macdSignal: null,
+			macdHistogram: null,
+			adx14: null,
+			adxTrend: null,
+			macdHistogramTrend: null,
+			volumeRatio: null,
+			volumeTrend: null,
+		});
+		const result = classifyMomentumVerdict(ind);
+		expect(result.verdict).toBe("neutral");
+	});
+});
+
 describe("formatIndicatorSummary", () => {
 	test("includes symbol, trend, RSI, ATR, ADX, and 52w fields", () => {
 		const bars = makeTrendingBars(250, 100, 0.5);
@@ -259,7 +386,15 @@ describe("formatIndicatorSummary", () => {
 		expect(summary).toContain("RSI(14):");
 		expect(summary).toContain("ADX(14):");
 		expect(summary).toContain("ATR:");
-		expect(summary).toContain("52w:");
+		expect(summary).toContain("52w range:");
 		expect(summary).toContain(" | ");
+	});
+
+	test("includes momentum verdict line", () => {
+		const bars = makeTrendingBars(250, 100, 0.5);
+		const indicators = computeIndicators("SHEL", bars);
+		const summary = formatIndicatorSummary(indicators);
+
+		expect(summary).toContain("Momentum:");
 	});
 });
