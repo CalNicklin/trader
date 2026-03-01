@@ -235,41 +235,31 @@ export async function loadResearchTasks(): Promise<readonly EvalTask[]> {
 }
 
 /**
- * Load frozen News Discovery eval tasks from production data.
- * Seeded from agent_logs with phase='news_discovery'.
+ * Load News Discovery eval tasks from live RSS feeds.
+ * These are capability evals (not regression) since the production pipeline
+ * doesn't persist the original headlines sent to Claude.
  */
 export async function loadNewsDiscoveryTasks(): Promise<readonly EvalTask[]> {
-	const { getDb } = await import("../../db/client.ts");
-	const { agentLogs } = await import("../../db/schema.ts");
-	const db = getDb();
+	const { fetchNews } = await import("../../research/sources/news-scraper.ts");
 
-	const rows = await db
-		.select()
-		.from(agentLogs)
-		.where(eq(agentLogs.phase, "news_discovery"))
-		.orderBy(desc(agentLogs.createdAt))
-		.limit(10);
+	const allNews = await fetchNews(5);
+	if (allNews.length === 0) return [];
 
+	const batchSize = 15;
 	const tasks: EvalTask[] = [];
 
-	for (const row of rows) {
-		const parsed = safeJsonParse(row.data);
-		const newsContent = parsed ? (parsed.newsContent ?? parsed.content ?? row.data) : row.data;
-
-		if (!newsContent) continue;
+	for (let i = 0; i < allNews.length; i += batchSize) {
+		const batch = allNews.slice(i, i + batchSize);
+		const headlines = batch.map((n) => `- ${n.title} (${n.source})`).join("\n");
 
 		tasks.push({
-			id: `news-${row.id}`,
+			id: `news-live-${i}`,
 			suite: "news_discovery",
-			input: {
-				newsContent,
-				systemPrompt: "",
-			},
-			metadata: {
-				type: "regression",
-				sourceLogId: row.id,
-			},
+			input: { headlines },
+			metadata: { type: "capability", batchStart: i, batchSize: batch.length },
 		});
+
+		if (tasks.length >= 5) break;
 	}
 
 	return tasks;

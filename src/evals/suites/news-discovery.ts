@@ -3,24 +3,29 @@ import Anthropic from "@anthropic-ai/sdk";
 import { gradeNewsDiscovery } from "../graders/code-graders-news.ts";
 import type { EvalTask, EvalTrial, Suite } from "../types.ts";
 
+const EXTRACTION_PROMPT = `Extract stock tickers mentioned in these financial headlines. Only include companies clearly mentioned by name.
+For UK companies, return the LSE ticker (without .L suffix), exchange "LSE".
+For US companies, return the NASDAQ or NYSE ticker, exchange "NASDAQ" or "NYSE".
+Return a JSON array of objects with "symbol", "name", and "exchange". Return [] if none found.`;
+
 async function runNewsDiscoveryTrial(task: EvalTask): Promise<EvalTrial> {
 	const { getConfig } = await import("../../config.ts");
 	const config = getConfig();
 
 	const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY, maxRetries: 1 });
 
-	const newsContent =
-		typeof task.input.newsContent === "string"
-			? task.input.newsContent
-			: JSON.stringify(task.input.newsContent);
-	const systemPrompt = typeof task.input.systemPrompt === "string" ? task.input.systemPrompt : "";
+	const headlines =
+		typeof task.input.headlines === "string"
+			? task.input.headlines
+			: JSON.stringify(task.input.headlines);
+
+	const userMessage = `${EXTRACTION_PROMPT}\n\nHeadlines:\n${headlines}`;
 
 	const start = performance.now();
 	const response = await client.messages.create({
 		model: config.CLAUDE_MODEL_FAST,
-		max_tokens: 1024,
-		system: systemPrompt,
-		messages: [{ role: "user", content: newsContent }],
+		max_tokens: 512,
+		messages: [{ role: "user", content: userMessage }],
 	});
 
 	const text = response.content
