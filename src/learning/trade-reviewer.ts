@@ -9,12 +9,28 @@ import { TRADE_REVIEWER_SYSTEM } from "./prompts.ts";
 
 const log = createChildLogger({ module: "trade-reviewer" });
 
-interface ReviewResult {
+export interface ReviewResult {
 	outcome: "win" | "loss" | "breakeven";
 	reasoningQuality: "sound" | "partial" | "flawed";
 	lessonLearned: string;
 	tags: string[];
 	shouldRepeat: boolean;
+	entrySignalQuality: "strong" | "adequate" | "weak" | "against_momentum";
+	exitTiming: "timely" | "late" | "premature" | "n/a";
+}
+
+export function parseReviewResult(json: string): ReviewResult {
+	const raw: Record<string, unknown> = JSON.parse(json);
+	return {
+		outcome: raw.outcome as ReviewResult["outcome"],
+		reasoningQuality: raw.reasoningQuality as ReviewResult["reasoningQuality"],
+		lessonLearned: String(raw.lessonLearned),
+		tags: raw.tags as string[],
+		shouldRepeat: Boolean(raw.shouldRepeat),
+		entrySignalQuality:
+			(raw.entrySignalQuality as ReviewResult["entrySignalQuality"]) ?? "adequate",
+		exitTiming: (raw.exitTiming as ReviewResult["exitTiming"]) ?? "n/a",
+	};
 }
 
 export async function runTradeReview(): Promise<void> {
@@ -130,7 +146,7 @@ Provide your review as JSON.`;
 				continue;
 			}
 
-			const result = JSON.parse(jsonMatch[0]) as ReviewResult;
+			const result = parseReviewResult(jsonMatch[0]);
 
 			await db.insert(tradeReviews).values({
 				tradeId: trade.id,
