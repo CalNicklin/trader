@@ -28,8 +28,12 @@
 - [seed-research] `loadResearchTasks()` in `src/evals/tasks/seed-from-prod.ts` — queries research table with rawData, joins watchlist for exchange
 - [seed-news] `loadNewsDiscoveryTasks()` in `src/evals/tasks/seed-from-prod.ts` — queries agent_logs with phase='news_discovery'
 
-## Current layer: L6
-## Next todo: outcome-trading-analyst
+- [outcome-trading-analyst] `evaluateTradeOutcomes()` in `src/evals/graders/outcome-trading-analyst.ts` — cross-refs decisions with decision_scores (T+1), missed opportunities, BUY profitability
+- [outcome-momentum-checks] `evaluateMomentumOutcomes()` in `src/evals/graders/outcome-momentum.ts` — trend continuation (3d), overbought reversal (5d), LSE stamp duty, deceleration hold, loser duration, missed momentum
+- [outcome-research] `evaluateResearchOutcomes()` in `src/evals/graders/outcome-research.ts` — T+5 price alignment, confidence calibration, gate tracking, BUY reversal
+
+## Current layer: L7
+## Next todo: job-wire
 
 ## Decisions
 
