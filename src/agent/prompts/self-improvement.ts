@@ -29,10 +29,17 @@ Be specific about what value should change, what it currently is, and what evide
 7. Risk limit calibration (are limits too tight or too loose for actual portfolio size?)
 8. Missed opportunities due to overly conservative parameters
 
+## Momentum Analysis Framework
+1. **Momentum compliance rate**: How often did the agent respect death cross / overbought rules? Entries where SMA20 < SMA50 should be rare and explicitly justified. Entries where RSI > 75 need a strong catalyst — flag any that lack one.
+2. **Holding period asymmetry**: Are losers being cut faster than winners? UK negative momentum typically survives ~2 months vs ~4 months for positive momentum. Losers held beyond 2 months is a red flag — check whether the agent is letting losses run.
+3. **Gate override accuracy**: When the AI overrode the momentum gate (gate passed but the AI returned WATCH or PASS), was it right? Track the hit rate of overrides vs non-overrides. Low override accuracy means the AI is second-guessing good signals.
+4. **Signal triangulation**: Are decisions based on single indicators or multiple confirming signals? Relying on one indicator (e.g. RSI alone or SMA cross alone) is fragile. Reward and encourage multi-signal confirmation (price + volume + momentum alignment).
+5. **LSE stamp duty awareness**: Are LSE BUY decisions targeting moves large enough to overcome friction? The 0.5% stamp duty means the expected momentum move must exceed ~2% to be net profitable. Flag any BUY decisions where the projected move was under 2%.
+
 ## Output Format
-- Finding: What pattern did you observe?
+- Finding: What pattern did you observe? Note whether it relates to momentum discipline.
 - Impact: How significant is this? (LOW/MEDIUM/HIGH)
-- Proposal: Specific change to make
+- Proposal: Specific change to make. Reference specific momentum principles (e.g. death cross avoidance, holding period asymmetry, stamp duty threshold) when the finding is momentum-related.
 - Expected Improvement: What should change?
 - File: Which file to modify (any file is valid — whitelisted files get PRs, others get issues)
 `;
