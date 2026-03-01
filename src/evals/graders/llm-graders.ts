@@ -94,6 +94,10 @@ export async function llmGradeQuickScan(trial: EvalTrial, task: EvalTask): Promi
 		const grade = typeof parsed.grade === "string" ? parsed.grade : "unknown";
 		const reasoning = typeof parsed.reasoning === "string" ? parsed.reasoning : "";
 
+		if (grade === "dangerous_miss") {
+			return { kind: "fail", grader, detail: `dangerous_miss: ${reasoning}` };
+		}
+
 		return {
 			kind: "label",
 			grader,
@@ -214,12 +218,21 @@ export async function llmGradeTradeAnalyst(
 		}
 
 		const avgScore = Object.values(dimensions).reduce((a, b) => a + b, 0) / 4;
+		const roundedScore = Math.round(avgScore * 10) / 10;
 		const overall = typeof parsed.overall === "string" ? parsed.overall : "";
+
+		if (roundedScore < 2.0) {
+			return {
+				kind: "fail",
+				grader,
+				detail: `score ${roundedScore}/5 below minimum threshold (2.0): ${overall}`,
+			};
+		}
 
 		return {
 			kind: "score",
 			grader,
-			score: Math.round(avgScore * 10) / 10,
+			score: roundedScore,
 			dimensions,
 			detail: overall,
 		};
@@ -282,6 +295,11 @@ export async function llmGradeResearch(trial: EvalTrial, task: EvalTask): Promis
 		const parsed = extractJson(response) as { grade?: string; reasoning?: string };
 		const grade = typeof parsed.grade === "string" ? parsed.grade : "unknown";
 		const reasoning = typeof parsed.reasoning === "string" ? parsed.reasoning : "";
+
+		const failGrades = new Set(["contradictory", "hallucinated"]);
+		if (failGrades.has(grade)) {
+			return { kind: "fail", grader, detail: `${grade}: ${reasoning}` };
+		}
 
 		return {
 			kind: "label",
