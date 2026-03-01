@@ -11,16 +11,25 @@
 - [code-grader-news] `gradeNewsDiscovery()` in `src/evals/graders/code-graders-news.ts` — schema validation, uppercase symbols, no .L suffix, no duplicates
 - [code-grader-trade-review] `gradeTradeReview()` in `src/evals/graders/code-graders-trade-review.ts` — schema validation, reasoning quality score, outcome label
 - [harness-runner] `runSuite()` and `runSuites()` in `src/evals/harness.ts` — loads tasks, runs N trials, applies graders (handles arrays), aggregates results, error handling
+- [llm-grader-quick-scan] `llmGradeQuickScan()` in `src/evals/graders/llm-graders.ts` — Sonnet prompt with 7 momentum principles, grades correct/overcautious/trigger_happy/dangerous_miss
+- [llm-grader-trading-analyst] `llmGradeTradeAnalyst()` in `src/evals/graders/llm-graders.ts` — 4 dimensions (reasoning, signal interpretation, action appropriateness, conciseness) each 1-5, returns averaged score
+- [llm-grader-research] `llmGradeResearch()` in `src/evals/graders/llm-graders.ts` — grades well_reasoned/superficial/contradictory/hallucinated with full momentum rubric
+- [test-code-graders] 37 unit tests in `tests/eval-code-graders.test.ts` — covers all 5 code graders + transcript grader with passing and failing fixtures
+- [harness-logging] `logEvalResults()` in `src/evals/logging.ts` — writes RunSummary to agent_logs with phase='eval', logs individual regressions
+- [test-harness] 12 unit tests in `tests/eval-harness.test.ts` — trial execution, grader application, result aggregation, error handling, array grader support
 
-## Current layer: L3
-## Next todo: llm-grader-quick-scan
+## Current layer: L4
+## Next todo: suite-quick-scan
 
 ## Decisions
 
 - Used Zod discriminated union for GraderResult with 6 kinds: pass/fail/score/label/flag/skip
 - Code graders return GraderResult[] (arrays); harness handles both single and array returns
-- LLM grader prompts will import from momentum-rubric.ts, not inline text
-- Grader naming convention: `<type>:<suite>` (e.g. `code:research`, `quick_scan_code`, `trading_analyst_code`)
-- Lazy logger import inside harness functions to avoid triggering config validation at import time
+- LLM grader prompts import from momentum-rubric.ts via `formatPrinciplesForPrompt()`, not inline text
+- All 3 LLM graders live in a single file (`llm-graders.ts`) sharing a common `callJudge()` helper and lazy Anthropic client
+- Grader naming convention: `<type>:<suite>` for code graders (e.g. `code:research`), `llm:<suite>` for LLM graders
+- Lazy logger import inside harness/logging functions to avoid triggering config validation at import time
 - Each code grader file has its own local Zod schema for output validation
 - `void task` used in graders that receive task but don't use it (news, trade-review) to satisfy unused-param lint
+- LLM graders use `require()` for config to avoid top-level side effects; client is lazily initialized
+- Harness tests mock the logger module to avoid config validation during tests
