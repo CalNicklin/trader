@@ -17,13 +17,17 @@ import { PATTERN_ANALYZER_SYSTEM } from "./prompts.ts";
 
 const log = createChildLogger({ module: "pattern-analyzer" });
 
+export type InsightCategory =
+	| "confidence_calibration"
+	| "sector_performance"
+	| "timing"
+	| "risk_management"
+	| "momentum_compliance"
+	| "holding_asymmetry"
+	| "general";
+
 interface InsightResult {
-	category:
-		| "confidence_calibration"
-		| "sector_performance"
-		| "timing"
-		| "risk_management"
-		| "general";
+	category: InsightCategory;
 	insight: string;
 	actionable: string;
 	severity: "info" | "warning" | "critical";

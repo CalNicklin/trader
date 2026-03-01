@@ -44,11 +44,17 @@ Identify up to 5 specific, actionable insights. Each insight must be:
 Respond with a JSON object containing two arrays:
 
 1. "insights": array of objects, each with:
-- category: "confidence_calibration" | "sector_performance" | "timing" | "risk_management" | "general"
+- category: "confidence_calibration" | "sector_performance" | "timing" | "risk_management" | "momentum_compliance" | "holding_asymmetry" | "general"
 - insight: plain text observation (max 200 chars)
 - actionable: specific guidance for the trading agent (max 200 chars)
 - severity: "info" | "warning" | "critical"
 - data: object with supporting numbers (e.g. { winRate: 0.6, sampleSize: 12 })
+
+For momentum-specific categories, look for:
+- "momentum_compliance": Patterns in entrySignalQuality across trade reviews. Are "against_momentum" entries losing more often? Are death cross entries being flagged? Track gate override accuracy trends.
+- "holding_asymmetry": Holding period differences between winners and losers. Are losers being cut within ~2 months (UK negative momentum lifespan)? Are winners being held long enough (~4 months positive momentum)?
+
+Also look for ADX regime effectiveness (do trades in strong ADX regimes perform better?) and signal triangulation patterns (single-indicator vs multi-indicator entries).
 
 Only return insights supported by sufficient data (at least 3 trades). If there isn't enough data for meaningful patterns, return fewer insights or an empty array.
 

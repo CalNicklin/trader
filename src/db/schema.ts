@@ -175,7 +175,15 @@ export const weeklyInsights = sqliteTable("weekly_insights", {
 	weekStart: text("week_start").notNull(),
 	runType: text("run_type", { enum: ["mid_week", "end_of_week"] }).notNull(),
 	category: text("category", {
-		enum: ["confidence_calibration", "sector_performance", "timing", "risk_management", "general"],
+		enum: [
+			"confidence_calibration",
+			"sector_performance",
+			"timing",
+			"risk_management",
+			"momentum_compliance",
+			"holding_asymmetry",
+			"general",
+		],
 	}).notNull(),
 	insight: text("insight").notNull(),
 	actionable: text("actionable").notNull(),

@@ -58,9 +58,21 @@ export async function buildLearningBrief(): Promise<string> {
 
 	if (reviews.length > 0) {
 		parts.push("\n### Recent trade lessons:");
+		let againstMomentumCount = 0;
+		let againstMomentumLosses = 0;
 		for (const r of reviews) {
 			parts.push(
 				`- ${r.symbol} (${r.outcome}, reasoning: ${r.reasoningQuality}): ${r.lessonLearned}`,
+			);
+			const tags = JSON.parse(r.tags) as string[];
+			if (tags.some((t) => t.includes("against-momentum") || t.includes("death-cross"))) {
+				againstMomentumCount++;
+				if (r.outcome === "loss") againstMomentumLosses++;
+			}
+		}
+		if (againstMomentumCount > 0) {
+			parts.push(
+				`\n### Momentum compliance: ${againstMomentumCount}/${reviews.length} recent trades entered against momentum signals (${againstMomentumLosses} resulted in losses)`,
 			);
 		}
 	}
