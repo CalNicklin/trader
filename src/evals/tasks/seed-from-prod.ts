@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNotNull, like, lt, or } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, like, lt } from "drizzle-orm";
 
 import type { EvalTask } from "../types.ts";
 
@@ -45,7 +45,8 @@ function deriveScanFlags(context: string): {
 
 /**
  * Load frozen Quick Scan eval tasks from production data.
- * Seeded from agent_logs with haiku_no_escalate/escalation entries.
+ * Seeded from "Quick scan:" messages logged by the Haiku triage step,
+ * with surrounding gate evaluation logs for context reconstruction.
  */
 export async function loadQuickScanTasks(): Promise<readonly EvalTask[]> {
 	const { getDb } = await import("../../db/client.ts");
@@ -56,9 +57,10 @@ export async function loadQuickScanTasks(): Promise<readonly EvalTask[]> {
 		.select()
 		.from(agentLogs)
 		.where(
-			or(
-				like(agentLogs.message, "Skip [haiku_no_escalate]%"),
-				like(agentLogs.message, "Escalating to full Sonnet%"),
+			and(
+				like(agentLogs.message, "Quick scan:%"),
+				eq(agentLogs.phase, "trading"),
+				eq(agentLogs.level, "INFO"),
 			),
 		)
 		.orderBy(desc(agentLogs.createdAt))
@@ -67,56 +69,48 @@ export async function loadQuickScanTasks(): Promise<readonly EvalTask[]> {
 	const tasks: EvalTask[] = [];
 
 	for (const row of rows) {
-		const data = safeJsonParse(row.data);
+		const windowStart = oneMinuteBefore(row.createdAt);
+		const surroundingLogs = await db
+			.select()
+			.from(agentLogs)
+			.where(
+				and(
+					gte(agentLogs.createdAt, windowStart),
+					lt(agentLogs.createdAt, row.createdAt),
+					eq(agentLogs.phase, "trading"),
+				),
+			)
+			.orderBy(desc(agentLogs.createdAt))
+			.limit(30);
 
-		let scanContext: string | null = null;
+		const gateEntries = surroundingLogs.filter((l) => {
+			const parsed = safeJsonParse(l.data);
+			return parsed?.type === "gate_evaluation";
+		});
 
-		if (data && typeof data.context === "string") {
-			scanContext = data.context;
-		}
+		let scanContext: string;
 
-		if (!scanContext) {
-			const windowStart = oneMinuteBefore(row.createdAt);
-			const surroundingLogs = await db
-				.select()
-				.from(agentLogs)
-				.where(
-					and(
-						gte(agentLogs.createdAt, windowStart),
-						lt(agentLogs.createdAt, row.createdAt),
-						eq(agentLogs.phase, "trading"),
-					),
-				)
-				.orderBy(desc(agentLogs.createdAt))
-				.limit(30);
+		if (gateEntries.length > 0) {
+			const gateData = gateEntries
+				.map((g) => {
+					const parsed = safeJsonParse(g.data);
+					return parsed
+						? `${parsed.symbol}: ${parsed.passed ? "PASS" : "FAIL"} — ${
+								Array.isArray(parsed.reasons)
+									? (parsed.reasons as unknown[]).join(", ")
+									: "no reasons"
+							}`
+						: g.message;
+				})
+				.join("\n");
 
-			const gateEntries = surroundingLogs.filter((l) => {
-				const parsed = safeJsonParse(l.data);
-				return parsed?.type === "gate_evaluation";
-			});
+			const contextParts = surroundingLogs
+				.filter((l) => !l.message.startsWith("Gate "))
+				.map((l) => l.message);
 
-			if (gateEntries.length > 0) {
-				const gateData = gateEntries
-					.map((g) => {
-						const parsed = safeJsonParse(g.data);
-						return parsed
-							? `${parsed.symbol}: ${parsed.passed ? "PASS" : "FAIL"} — ${
-									Array.isArray(parsed.reasons)
-										? (parsed.reasons as unknown[]).join(", ")
-										: "no reasons"
-								}`
-							: g.message;
-					})
-					.join("\n");
-
-				const contextParts = surroundingLogs
-					.filter((l) => !l.message.startsWith("Gate "))
-					.map((l) => l.message);
-
-				scanContext = [...contextParts, `Gate results:\n${gateData}`].join("\n");
-			} else {
-				scanContext = surroundingLogs.map((l) => l.message).join("\n");
-			}
+			scanContext = [...contextParts, `Gate results:\n${gateData}`].join("\n");
+		} else {
+			scanContext = surroundingLogs.map((l) => l.message).join("\n");
 		}
 
 		if (!scanContext) continue;
