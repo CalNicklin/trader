@@ -18,8 +18,13 @@
 - [harness-logging] `logEvalResults()` in `src/evals/logging.ts` — writes RunSummary to agent_logs with phase='eval', logs individual regressions
 - [test-harness] 12 unit tests in `tests/eval-harness.test.ts` — trial execution, grader application, result aggregation, error handling, array grader support
 
-## Current layer: L4
-## Next todo: suite-quick-scan
+- [suite-quick-scan] `quickScanSuite` in `src/evals/suites/quick-scan.ts` — code + LLM graders, Haiku trial runner, 1 regression / 3 capability trials
+- [suite-trading-analyst] `tradingAnalystSuite` in `src/evals/suites/trading-analyst.ts` — code + LLM + transcript graders, uses `runTradingAnalyst()` for real Sonnet agentic loop
+- [suite-research] `researchSuite` in `src/evals/suites/research.ts` — code + LLM graders, Sonnet trial runner
+- [suite-news-discovery] `newsDiscoverySuite` in `src/evals/suites/news-discovery.ts` — code grader only, Haiku, 1 regression trial
+
+## Current layer: L5
+## Next todo: seed-quick-scan
 
 ## Decisions
 
