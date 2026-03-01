@@ -118,11 +118,11 @@ export type EvalResult = z.infer<typeof EvalResultSchema>;
 // Grader function signatures
 // ---------------------------------------------------------------------------
 
-export type CodeGrader = (trial: EvalTrial, task: EvalTask) => GraderResult;
+export type CodeGrader = (trial: EvalTrial, task: EvalTask) => GraderResult | GraderResult[];
 
 export type LlmGrader = (trial: EvalTrial, task: EvalTask) => Promise<GraderResult>;
 
-export type TranscriptGrader = (trial: EvalTrial, task: EvalTask) => GraderResult;
+export type TranscriptGrader = (trial: EvalTrial, task: EvalTask) => GraderResult | GraderResult[];
 
 export type Grader =
 	| { type: "code"; fn: CodeGrader }
