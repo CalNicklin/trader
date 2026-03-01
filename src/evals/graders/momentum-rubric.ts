@@ -106,9 +106,6 @@ export function formatPrinciplesForPrompt(ids?: readonly number[]): string {
 		: MOMENTUM_PRINCIPLES;
 
 	return selected
-		.map(
-			(p) =>
-				`${p.id}. **${p.name}**: ${p.summary}\n   Grading: ${p.graderGuidance}`,
-		)
+		.map((p) => `${p.id}. **${p.name}**: ${p.summary}\n   Grading: ${p.graderGuidance}`)
 		.join("\n\n");
 }
