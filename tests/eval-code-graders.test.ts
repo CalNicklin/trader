@@ -183,21 +183,18 @@ describe("gradeTradeAnalyst", () => {
 		expect(results.some((r) => r.kind === "flag" && r.flag === "gate_override")).toBe(true);
 	});
 
-	test("fails when tool calls exceed max iterations", () => {
+	test("fails when tool calls exceed limit (iterations * 3)", () => {
 		const task = makeTask({
 			suite: "trading_analyst",
 			input: { conclusion: "hold" },
-			metadata: { maxIterations: 3 },
+			metadata: { maxIterations: 2 },
 		});
-		const trial = makeTrial({
-			output: "Holding.",
-			toolCalls: [
-				{ name: "get_positions", input: {}, output: "[]" },
-				{ name: "get_quote", input: {}, output: "{}" },
-				{ name: "get_account_summary", input: {}, output: "{}" },
-				{ name: "log_decision", input: {}, output: "ok" },
-			],
-		});
+		const calls = Array.from({ length: 7 }, (_, i) => ({
+			name: `tool_${i}`,
+			input: {},
+			output: "ok",
+		}));
+		const trial = makeTrial({ output: "Holding.", toolCalls: calls });
 		const results = gradeTradeAnalyst(trial, task);
 		expect(results.some((r) => r.kind === "fail" && r.detail.includes("tool calls"))).toBe(true);
 	});

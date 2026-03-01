@@ -6,16 +6,24 @@ function countWords(text: string): number {
 	return text.split(/\s+/).filter(Boolean).length;
 }
 
-function getMaxIterations(task: EvalTask): number {
+/**
+ * maxIterations controls API round-trips, not individual tool calls.
+ * Each round-trip can invoke multiple tools in parallel, so the
+ * tool-call budget is iterations * TOOLS_PER_ITERATION.
+ */
+const TOOLS_PER_ITERATION = 3;
+
+function getMaxToolCalls(task: EvalTask): number {
 	const raw = task.metadata?.maxIterations;
-	return typeof raw === "number" && raw > 0 ? raw : 5;
+	const iterations = typeof raw === "number" && raw > 0 ? raw : 5;
+	return iterations * TOOLS_PER_ITERATION;
 }
 
 export function gradeTradeAnalyst(trial: EvalTrial, task: EvalTask): GraderResult[] {
 	const results: GraderResult[] = [];
 	const output = typeof trial.output === "string" ? trial.output : String(trial.output ?? "");
 	const wordCount = countWords(output);
-	const maxIterations = getMaxIterations(task);
+	const maxToolCalls = getMaxToolCalls(task);
 
 	if (wordCount > 300) {
 		results.push({
@@ -76,17 +84,17 @@ export function gradeTradeAnalyst(trial: EvalTrial, task: EvalTask): GraderResul
 		});
 	}
 
-	if (toolCalls.length > maxIterations) {
+	if (toolCalls.length > maxToolCalls) {
 		results.push({
 			kind: "fail",
 			grader: GRADER,
-			detail: `${toolCalls.length} tool calls exceeds max iterations (${maxIterations})`,
+			detail: `${toolCalls.length} tool calls exceeds limit (${maxToolCalls})`,
 		});
 	} else {
 		results.push({
 			kind: "pass",
 			grader: GRADER,
-			detail: `${toolCalls.length} tool calls within limit (${maxIterations})`,
+			detail: `${toolCalls.length} tool calls within limit (${maxToolCalls})`,
 		});
 	}
 
