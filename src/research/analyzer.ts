@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getTradingMode } from "../agent/prompts/trading-mode.ts";
 import { formatIndicatorSummary, type TechnicalIndicators } from "../analysis/indicators.ts";
 import { getConfig } from "../config.ts";
+import { formatPrinciplesForPrompt } from "../evals/graders/momentum-rubric.ts";
 import { createChildLogger } from "../utils/logger.ts";
 import { recordUsage } from "../utils/token-tracker.ts";
 
@@ -29,15 +30,40 @@ export interface AnalysisResult {
 	catalyst_detail: string;
 	fundamental_value: "undervalued" | "fair" | "overvalued";
 	earnings_proximity: number | null;
+	momentum_assessment: "strong" | "building" | "neutral" | "decelerating" | "exhausted";
 }
 
-const ANALYSIS_BASE = `You are a senior equity analyst. Evaluate the provided stock data as a quality filter.
+const ANALYSIS_BASE = `You are a MOMENTUM trader. Momentum trading is NOT value investing. A stock near 52-week highs with confirmed trend alignment and volume is a BUY candidate, not overvalued.
 
-Your job is to answer:
+## MOMENTUM PRINCIPLES
+
+${formatPrinciplesForPrompt()}
+
+## HARD RULES (violations = quality_pass: "fail")
+
+- Do NOT recommend BUY when SMA20 < SMA50 (death cross) unless there is an extraordinary catalyst
+- Do NOT recommend BUY when RSI > 75 without a specific catalyst
+- For LSE stocks: Do NOT recommend BUY if expected momentum move < 2% (stamp duty friction)
+
+## GUIDANCE (consider but may override with justification)
+
+- Volume ratio >= 0.8 confirms momentum; low volume = noise
+- Triangulate across trend + RSI + MACD + volume + Bollinger
+- Declining ADX + bearish RSI divergence + shrinking MACD histogram = exit signals
+- Near 52w highs with confirmed trend = BUY candidate, not "overvalued"
+- Bollinger %B > 0.8 in trending market = riding the band (normal), not sell signal
+
+## SECONDARY: Fundamental quality filter
+
+After evaluating momentum signals, also consider:
 1. Does this business have real revenue, positive cash flow, and sustainable operations?
 2. Are there specific red flags? (cash burn, debt/equity > 1.5, margin compression, revenue decline, pending regulatory action)
 3. Are there upcoming catalysts? (earnings, contracts, upgrades, sector shifts)
 4. Is the stock cheap, fair, or expensive relative to its sector?
+
+Fundamentals serve as a quality gate — they can disqualify a candidate but should not override strong momentum signals.
+
+## RESPONSE FORMAT
 
 Always respond in valid JSON with these fields:
 - sentiment: number from -1 (very bearish) to 1 (very bullish)
@@ -47,11 +73,12 @@ Always respond in valid JSON with these fields:
 - bearCase: string (max 200 chars)
 - analysis: string (max 500 chars)
 - quality_pass: "pass" | "marginal" | "fail"
-- quality_flags: string[] (e.g. ["high_debt", "margin_compression", "cash_burn"])
+- quality_flags: string[] (e.g. ["high_debt", "margin_compression", "cash_burn", "death_cross_buy", "overbought_no_catalyst"])
 - catalyst: "positive" | "neutral" | "negative" | "earnings_imminent"
 - catalyst_detail: string (e.g. "earnings beat + raised guidance")
 - fundamental_value: "undervalued" | "fair" | "overvalued"
-- earnings_proximity: number | null (trading days to next earnings, null if unknown)`;
+- earnings_proximity: number | null (trading days to next earnings, null if unknown)
+- momentum_assessment: "strong" | "building" | "neutral" | "decelerating" | "exhausted"`;
 
 const PAPER_SUFFIX =
 	"\n\nAssess objectively. Recommend BUY when the thesis is supported by fundamentals or technicals — do not default to WATCH out of caution. This is a paper account generating data for a learning loop.";
@@ -133,6 +160,7 @@ Provide your analysis as JSON.`;
 			catalyst_detail: "",
 			fundamental_value: "fair",
 			earnings_proximity: null,
+			momentum_assessment: "neutral",
 		};
 	}
 }
