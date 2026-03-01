@@ -58,4 +58,54 @@ describe("computeScore", () => {
 		});
 		expect(score).toBe(0);
 	});
+
+	test("strong momentum assessment yields max momentum score", () => {
+		const score = computeScore({
+			qualityPass: "pass",
+			changePercentage: 0,
+			daysSinceResearch: 0,
+			momentumAssessment: "strong",
+		});
+		expect(score).toBe(100);
+	});
+
+	test("exhausted momentum assessment yields zero momentum", () => {
+		const score = computeScore({
+			qualityPass: "pass",
+			changePercentage: 10,
+			daysSinceResearch: 0,
+			momentumAssessment: "exhausted",
+		});
+		expect(score).toBe(0);
+	});
+
+	test("momentum assessment takes precedence over changePercentage", () => {
+		const withAssessment = computeScore({
+			qualityPass: "pass",
+			changePercentage: 15,
+			daysSinceResearch: 0,
+			momentumAssessment: "decelerating",
+		});
+		const withoutAssessment = computeScore({
+			qualityPass: "pass",
+			changePercentage: 15,
+			daysSinceResearch: 0,
+		});
+		expect(withAssessment).toBeLessThan(withoutAssessment);
+	});
+
+	test("null momentum assessment falls back to changePercentage proxy", () => {
+		const withNull = computeScore({
+			qualityPass: "pass",
+			changePercentage: 5,
+			daysSinceResearch: 0,
+			momentumAssessment: null,
+		});
+		const withoutField = computeScore({
+			qualityPass: "pass",
+			changePercentage: 5,
+			daysSinceResearch: 0,
+		});
+		expect(withNull).toBeCloseTo(withoutField);
+	});
 });

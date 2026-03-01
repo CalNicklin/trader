@@ -10,17 +10,33 @@ export interface ScoreInput {
 	qualityPass: "pass" | "marginal" | "fail" | null;
 	changePercentage: number;
 	daysSinceResearch: number;
+	momentumAssessment?: "strong" | "building" | "neutral" | "decelerating" | "exhausted" | null;
 }
+
+const MOMENTUM_MULTIPLIERS: Record<string, number> = {
+	strong: 1.0,
+	building: 0.8,
+	neutral: 0.5,
+	decelerating: 0.2,
+	exhausted: 0,
+};
 
 /**
  * Pure scoring formula: qualityMultiplier * momentumProxy * recencyDecay.
  * Returns 0-100. quality_pass="fail" always returns 0.
+ * When momentum_assessment is available from research, uses it directly
+ * instead of the changePercentage proxy.
  */
 export function computeScore(input: ScoreInput): number {
 	const qualityMultiplier =
 		input.qualityPass === "pass" ? 1.0 : input.qualityPass === "marginal" ? 0.5 : 0;
 
-	const momentumProxy = Math.max(0, Math.min(100, (input.changePercentage + 10) * (100 / 30)));
+	let momentumProxy: number;
+	if (input.momentumAssessment && input.momentumAssessment in MOMENTUM_MULTIPLIERS) {
+		momentumProxy = MOMENTUM_MULTIPLIERS[input.momentumAssessment]! * 100;
+	} else {
+		momentumProxy = Math.max(0, Math.min(100, (input.changePercentage + 10) * (100 / 30)));
+	}
 
 	const recencyDecay = Math.max(0, 1 - (input.daysSinceResearch / 7) * 0.05);
 
@@ -90,6 +106,7 @@ export async function updateScore(symbol: string): Promise<number> {
 			((rawData?.quote as Record<string, unknown>)?.changePercentage as number) ??
 			0,
 		daysSinceResearch,
+		momentumAssessment: (rawData?.momentum_assessment as ScoreInput["momentumAssessment"]) ?? null,
 	});
 
 	await db

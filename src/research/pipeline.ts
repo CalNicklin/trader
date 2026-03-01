@@ -16,7 +16,13 @@ import { createFMPScreenerDeps, screenLSEStocks } from "./sources/lse-screener.t
 import { fetchNews, filterNewsForSymbols, type NewsItem } from "./sources/news-scraper.ts";
 import { createUSScreenerDeps, screenUSStocks } from "./sources/us-screener.ts";
 import { getYahooFundamentals, getYahooQuote } from "./sources/yahoo-finance.ts";
-import { addToWatchlist, getActiveWatchlist, getStaleSymbols, updateScore } from "./watchlist.ts";
+import {
+	addToWatchlist,
+	decayScores,
+	getActiveWatchlist,
+	getStaleSymbols,
+	updateScore,
+} from "./watchlist.ts";
 
 const log = createChildLogger({ module: "research-pipeline" });
 
@@ -51,6 +57,9 @@ export async function runResearchPipeline(): Promise<void> {
 	log.info("Research pipeline starting");
 
 	try {
+		// Stage 0: Decay stale watchlist scores before discovery
+		await decayScores();
+
 		// Stage 1: Universe screening - discover new candidates
 		await discoverNewStocks();
 
@@ -346,6 +355,7 @@ export async function researchSymbol(
 			catalyst_detail: analysis.catalyst_detail ?? null,
 			fundamental_value: analysis.fundamental_value ?? null,
 			earnings_proximity: analysis.earnings_proximity ?? null,
+			momentum_assessment: analysis.momentum_assessment ?? null,
 		}),
 		sentiment: analysis.sentiment,
 		bullCase: analysis.bullCase,
