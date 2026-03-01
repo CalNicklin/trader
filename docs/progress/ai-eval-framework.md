@@ -32,8 +32,10 @@
 - [outcome-momentum-checks] `evaluateMomentumOutcomes()` in `src/evals/graders/outcome-momentum.ts` — trend continuation (3d), overbought reversal (5d), LSE stamp duty, deceleration hold, loser duration, missed momentum
 - [outcome-research] `evaluateResearchOutcomes()` in `src/evals/graders/outcome-research.ts` — T+5 price alignment, confidence calibration, gate tracking, BUY reversal
 
-## Current layer: L7
-## Next todo: job-wire
+- [job-wire] `runAiEvals()` in `src/evals/runner.ts` — wires all suites, budget check via canAffordSonnet(), registered as `ai_evals` job in scheduler + admin server
+
+## Status: COMPLETE
+## All 27 todos implemented across L1-L7
 
 ## Decisions
 
