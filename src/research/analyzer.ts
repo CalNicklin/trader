@@ -57,7 +57,7 @@ const PAPER_SUFFIX =
 	"\n\nAssess objectively. Recommend BUY when the thesis is supported by fundamentals or technicals — do not default to WATCH out of caution. This is a paper account generating data for a learning loop.";
 const LIVE_SUFFIX = "\n\nBe conservative. Default to WATCH unless there's a compelling case.";
 
-function getAnalysisSystem(): string {
+export function getAnalysisSystem(): string {
 	return ANALYSIS_BASE + (getTradingMode() === "paper" ? PAPER_SUFFIX : LIVE_SUFFIX);
 }
 

@@ -6,6 +6,7 @@ import type { EvalTask, EvalTrial, Suite } from "../types.ts";
 
 async function runResearchTrial(task: EvalTask): Promise<EvalTrial> {
 	const { getConfig } = await import("../../config.ts");
+	const { getAnalysisSystem } = await import("../../research/analyzer.ts");
 	const config = getConfig();
 
 	const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY, maxRetries: 1 });
@@ -14,14 +15,16 @@ async function runResearchTrial(task: EvalTask): Promise<EvalTrial> {
 		typeof task.input.rawData === "string"
 			? task.input.rawData
 			: JSON.stringify(task.input.rawData);
-	const systemPrompt = typeof task.input.systemPrompt === "string" ? task.input.systemPrompt : "";
+
+	const symbol = typeof task.input.symbol === "string" ? task.input.symbol : "UNKNOWN";
+	const userPrompt = `Analyze ${symbol} based on this data:\n\n${rawData}\n\nProvide your analysis as JSON.`;
 
 	const start = performance.now();
 	const response = await client.messages.create({
 		model: config.CLAUDE_MODEL,
-		max_tokens: 2048,
-		system: systemPrompt,
-		messages: [{ role: "user", content: rawData }],
+		max_tokens: 1024,
+		system: getAnalysisSystem(),
+		messages: [{ role: "user", content: userPrompt }],
 	});
 
 	const text = response.content

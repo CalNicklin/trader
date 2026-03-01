@@ -219,7 +219,6 @@ export async function loadResearchTasks(): Promise<readonly EvalTask[]> {
 				rawData,
 				symbol: row.symbol,
 				exchange: watchlistRow?.exchange ?? "LSE",
-				systemPrompt: "",
 			},
 			expectedBehavior: `suggestedAction=${row.suggestedAction ?? "unknown"} confidence=${row.confidence ?? 0}`,
 			metadata: {
