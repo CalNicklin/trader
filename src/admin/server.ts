@@ -17,6 +17,7 @@ const VALID_JOBS: ReadonlySet<string> = new Set<JobName>([
 	"trade_review",
 	"mid_week_analysis",
 	"end_of_week_analysis",
+	"ai_evals",
 ]);
 
 let server: ReturnType<typeof Bun.serve> | null = null;

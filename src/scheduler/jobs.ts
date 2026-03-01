@@ -19,7 +19,8 @@ export type JobName =
 	| "mid_week_analysis"
 	| "end_of_week_analysis"
 	| "heartbeat"
-	| "cost_evals";
+	| "cost_evals"
+	| "ai_evals";
 
 const BROKER_JOBS: ReadonlySet<JobName> = new Set([
 	"orchestrator_tick",
@@ -138,6 +139,12 @@ async function executeJob(name: JobName): Promise<void> {
 		case "cost_evals": {
 			const { runCostEvals } = await import("../evals/cost-evals.ts");
 			await runCostEvals();
+			break;
+		}
+
+		case "ai_evals": {
+			const { runAiEvals } = await import("../evals/runner.ts");
+			await runAiEvals();
 			break;
 		}
 	}
