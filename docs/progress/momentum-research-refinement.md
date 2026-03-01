@@ -48,9 +48,13 @@
   - Enriched `buildLearningBrief()` with momentum compliance summary (against-momentum entry count + loss rate)
   - Tests: 3 tests in `tests/pattern-analyzer.test.ts`
 
-## Current layer: L3
+- **[quick-scan-prompt]** Added 200-char limit to quick scan reason
+  - Added "Your reason must be under 200 characters." to QUICK_SCAN_BASE prompt
+  - Primary fix for Quick Scan eval: 17/20 failures were solely due to reason length
 
-## Next todo: quick-scan-prompt
+## Current layer: L4
+
+## Next todo: verify
 
 ## Decisions
 

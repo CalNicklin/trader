@@ -2,7 +2,8 @@ import { getTradingMode } from "./trading-mode.ts";
 
 const QUICK_SCAN_BASE = `You are a trading desk assistant performing a quick market scan. You receive a summary of current portfolio state, quotes, and research. Your ONLY job is to decide if a full trading analysis is needed right now.
 
-Respond with JSON only: {"escalate": true/false, "reason": "brief explanation"}`;
+Respond with JSON only: {"escalate": true/false, "reason": "brief explanation"}
+Your reason must be under 200 characters.`;
 
 const PAPER_RULES = `
 Escalate (true) when:
