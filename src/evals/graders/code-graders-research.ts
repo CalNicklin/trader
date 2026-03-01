@@ -9,7 +9,7 @@ const QualityPass = z.enum(["pass", "marginal", "fail"]);
 
 const ResearchOutputSchema = z.object({
 	sentiment: z.number(),
-	suggestedAction: SuggestedAction,
+	action: SuggestedAction,
 	confidence: z.number(),
 	quality_pass: QualityPass,
 });
@@ -58,12 +58,12 @@ export function gradeResearch(trial: EvalTrial, task: EvalTask): GraderResult[] 
 		results.push({ kind: "pass", grader: `${GRADER}:confidence-range` });
 	}
 
-	if (parsed.quality_pass === "fail" && parsed.suggestedAction === "BUY") {
+	if (parsed.quality_pass === "fail" && parsed.action === "BUY") {
 		results.push({
 			kind: "flag",
 			grader: `${GRADER}:quality-action`,
 			flag: "buy-on-fail",
-			detail: `suggestedAction is BUY but quality_pass is "fail"`,
+			detail: `action is BUY but quality_pass is "fail"`,
 		});
 	} else {
 		results.push({ kind: "pass", grader: `${GRADER}:quality-action` });
@@ -71,21 +71,21 @@ export function gradeResearch(trial: EvalTrial, task: EvalTask): GraderResult[] 
 
 	// Stamp duty on LSE makes low-conviction BUYs unprofitable
 	const exchange = task.input.exchange;
-	if (exchange === "LSE" && parsed.suggestedAction === "BUY" && parsed.confidence < 0.6) {
+	if (exchange === "LSE" && parsed.action === "BUY" && parsed.confidence < 0.6) {
 		results.push({
 			kind: "flag",
 			grader: `${GRADER}:lse-conviction`,
 			flag: "low-conviction-lse-buy",
 			detail: `LSE BUY with confidence ${parsed.confidence} < 0.6 threshold (stamp duty friction)`,
 		});
-	} else if (exchange === "LSE" && parsed.suggestedAction === "BUY") {
+	} else if (exchange === "LSE" && parsed.action === "BUY") {
 		results.push({ kind: "pass", grader: `${GRADER}:lse-conviction` });
 	}
 
 	results.push({
 		kind: "label",
 		grader: `${GRADER}:action`,
-		label: parsed.suggestedAction,
+		label: parsed.action,
 		detail: `confidence=${parsed.confidence}, quality=${parsed.quality_pass}`,
 	});
 

@@ -307,7 +307,7 @@ describe("gradeResearch", () => {
 		const trial = makeTrial({
 			output: JSON.stringify({
 				sentiment: 0.7,
-				suggestedAction: "BUY",
+				action: "BUY",
 				confidence: 0.8,
 				quality_pass: "pass",
 			}),
@@ -326,7 +326,7 @@ describe("gradeResearch", () => {
 		const trial = makeTrial({
 			output: JSON.stringify({
 				sentiment: 0.5,
-				suggestedAction: "HOLD",
+				action: "HOLD",
 				confidence: 1.5,
 				quality_pass: "pass",
 			}),
@@ -339,7 +339,7 @@ describe("gradeResearch", () => {
 		const trial = makeTrial({
 			output: JSON.stringify({
 				sentiment: 0.3,
-				suggestedAction: "BUY",
+				action: "BUY",
 				confidence: 0.5,
 				quality_pass: "fail",
 			}),
@@ -353,7 +353,7 @@ describe("gradeResearch", () => {
 		const trial = makeTrial({
 			output: JSON.stringify({
 				sentiment: 0.6,
-				suggestedAction: "BUY",
+				action: "BUY",
 				confidence: 0.5,
 				quality_pass: "pass",
 			}),
@@ -369,7 +369,7 @@ describe("gradeResearch", () => {
 		const trial = makeTrial({
 			output: JSON.stringify({
 				sentiment: 0.8,
-				suggestedAction: "BUY",
+				action: "BUY",
 				confidence: 0.7,
 				quality_pass: "pass",
 			}),

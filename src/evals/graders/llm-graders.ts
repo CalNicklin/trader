@@ -243,7 +243,7 @@ ${formatPrinciplesForPrompt()}
 
 Momentum-specific evaluation:
 - Does the research correctly identify whether the stock is in a momentum phase (trending) vs range-bound?
-- Is the suggestedAction consistent with momentum signals? BUY should align with uptrend + building RSI + volume
+- Is the action consistent with momentum signals? BUY should align with uptrend + building RSI + volume
 - Does it identify potential momentum catalysts vs noise?
 - Does it flag momentum exhaustion risks (overbought RSI, declining volume, bearish divergence)?
 - Does it avoid value-investing bias? Near 52w highs with confirmed momentum = BUY candidate, not "overvalued"
