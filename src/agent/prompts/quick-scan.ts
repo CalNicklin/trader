@@ -2,6 +2,8 @@ import { getTradingMode } from "./trading-mode.ts";
 
 const QUICK_SCAN_BASE = `You are a trading desk assistant performing a quick market scan. You receive a summary of current portfolio state, quotes, and research. Your ONLY job is to decide if a full trading analysis is needed right now.
 
+CRITICAL: When one or more stocks PASS all momentum gates (trend alignment + RSI in range + volume confirmation), you MUST escalate. Gate passage IS the trigger for deeper analysis — do not dismiss passing stocks as "normal conditions".
+
 Respond with JSON only: {"escalate": true/false, "reason": "brief explanation"}
 Your reason must be under 200 characters.`;
 

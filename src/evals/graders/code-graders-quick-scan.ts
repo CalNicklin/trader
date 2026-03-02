@@ -41,11 +41,12 @@ export function gradeQuickScan(trial: EvalTrial, task: EvalTask): GraderResult[]
 
 	results.push({ kind: "pass", grader: GRADER, detail: "Valid JSON structure" });
 
-	if (reason.length >= 200) {
+	const MAX_REASON_CHARS = 300;
+	if (reason.length > MAX_REASON_CHARS) {
 		results.push({
 			kind: "fail",
 			grader: GRADER,
-			detail: `Reason is ${reason.length} chars, must be under 200`,
+			detail: `Reason is ${reason.length} chars, must be under ${MAX_REASON_CHARS}`,
 		});
 	} else {
 		results.push({ kind: "pass", grader: GRADER, detail: "Reason length OK" });

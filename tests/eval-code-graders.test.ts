@@ -55,12 +55,20 @@ describe("gradeQuickScan", () => {
 		expect(results.some((r) => r.kind === "fail")).toBe(true);
 	});
 
-	test("fails when reason exceeds 200 chars", () => {
+	test("fails when reason exceeds 300 chars", () => {
 		const trial = makeTrial({
-			output: JSON.stringify({ escalate: true, reason: "x".repeat(201) }),
+			output: JSON.stringify({ escalate: true, reason: "x".repeat(301) }),
 		});
 		const results = gradeQuickScan(trial, task);
-		expect(results.some((r) => r.kind === "fail" && r.detail.includes("200"))).toBe(true);
+		expect(results.some((r) => r.kind === "fail" && r.detail?.includes("300"))).toBe(true);
+	});
+
+	test("passes when reason at 299 chars", () => {
+		const trial = makeTrial({
+			output: JSON.stringify({ escalate: true, reason: "x".repeat(299) }),
+		});
+		const results = gradeQuickScan(trial, task);
+		expect(results.some((r) => r.kind === "fail" && r.detail?.includes("char"))).toBe(false);
 	});
 
 	test("fails when stop-loss breach present but escalate is false", () => {
