@@ -133,9 +133,11 @@ export async function loadQuickScanTasks(): Promise<readonly EvalTask[]> {
  * Seeded from agent_logs DECISION entries with data.quotes/gateStates.
  */
 export async function loadTradingAnalystTasks(): Promise<readonly EvalTask[]> {
+	const { getConfig } = await import("../../config.ts");
 	const { getDb } = await import("../../db/client.ts");
 	const { agentLogs, escalationState } = await import("../../db/schema.ts");
 	const db = getDb();
+	const maxIterations = getConfig().MAX_AGENT_ITERATIONS;
 
 	const rows = await db
 		.select()
@@ -177,7 +179,7 @@ export async function loadTradingAnalystTasks(): Promise<readonly EvalTask[]> {
 				...(quotes !== null ? { quotes } : {}),
 				...(gateStates !== null ? { gateStates } : {}),
 			},
-			metadata: { type: "regression", sourceLogId: row.id },
+			metadata: { type: "regression", sourceLogId: row.id, maxIterations },
 		});
 	}
 

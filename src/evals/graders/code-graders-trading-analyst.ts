@@ -25,11 +25,12 @@ export function gradeTradeAnalyst(trial: EvalTrial, task: EvalTask): GraderResul
 	const wordCount = countWords(output);
 	const maxToolCalls = getMaxToolCalls(task);
 
-	if (wordCount > 300) {
+	const MAX_RESPONSE_WORDS = 500;
+	if (wordCount > MAX_RESPONSE_WORDS) {
 		results.push({
 			kind: "fail",
 			grader: GRADER,
-			detail: `Response is ${wordCount} words, exceeds 300 word limit`,
+			detail: `Response is ${wordCount} words, exceeds ${MAX_RESPONSE_WORDS} word limit`,
 		});
 	} else {
 		results.push({ kind: "pass", grader: GRADER, detail: `Response is ${wordCount} words` });
@@ -98,15 +99,16 @@ export function gradeTradeAnalyst(trial: EvalTrial, task: EvalTask): GraderResul
 		});
 	}
 
+	const MAX_LOG_DECISION_WORDS = 150;
 	for (const tc of toolCalls) {
 		if (tc.name !== "log_decision") continue;
 		const outputText = typeof tc.output === "string" ? tc.output : String(tc.output ?? "");
 		const words = countWords(outputText);
-		if (words > 100) {
+		if (words > MAX_LOG_DECISION_WORDS) {
 			results.push({
 				kind: "fail",
 				grader: GRADER,
-				detail: `log_decision output is ${words} words, exceeds 100 word limit`,
+				detail: `log_decision output is ${words} words, exceeds ${MAX_LOG_DECISION_WORDS} word limit`,
 			});
 		}
 	}

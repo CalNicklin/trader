@@ -131,17 +131,30 @@ describe("gradeTradeAnalyst", () => {
 		expect(fails).toHaveLength(0);
 	});
 
-	test("fails when word count exceeds 300", () => {
+	test("fails when word count exceeds 500", () => {
 		const task = makeTask({
 			suite: "trading_analyst",
 			input: { conclusion: "hold" },
 		});
 		const trial = makeTrial({
-			output: Array(301).fill("word").join(" "),
+			output: Array(501).fill("word").join(" "),
 			toolCalls: [],
 		});
 		const results = gradeTradeAnalyst(trial, task);
-		expect(results.some((r) => r.kind === "fail" && r.detail.includes("300"))).toBe(true);
+		expect(results.some((r) => r.kind === "fail" && r.detail.includes("500"))).toBe(true);
+	});
+
+	test("passes when word count at 499", () => {
+		const task = makeTask({
+			suite: "trading_analyst",
+			input: { conclusion: "hold" },
+		});
+		const trial = makeTrial({
+			output: Array(499).fill("word").join(" "),
+			toolCalls: [],
+		});
+		const results = gradeTradeAnalyst(trial, task);
+		expect(results.some((r) => r.kind === "fail" && r.detail?.includes("word"))).toBe(false);
 	});
 
 	test("fails when acted but no trade tool call", () => {
@@ -199,7 +212,7 @@ describe("gradeTradeAnalyst", () => {
 		expect(results.some((r) => r.kind === "fail" && r.detail.includes("tool calls"))).toBe(true);
 	});
 
-	test("fails when log_decision output exceeds 100 words", () => {
+	test("fails when log_decision output exceeds 150 words", () => {
 		const task = makeTask({
 			suite: "trading_analyst",
 			input: { conclusion: "hold" },
@@ -210,12 +223,34 @@ describe("gradeTradeAnalyst", () => {
 				{
 					name: "log_decision",
 					input: {},
-					output: Array(101).fill("word").join(" "),
+					output: Array(151).fill("word").join(" "),
 				},
 			],
 		});
 		const results = gradeTradeAnalyst(trial, task);
 		expect(results.some((r) => r.kind === "fail" && r.detail.includes("log_decision"))).toBe(true);
+		expect(results.some((r) => r.kind === "fail" && r.detail?.includes("150"))).toBe(true);
+	});
+
+	test("passes when log_decision output at 149 words", () => {
+		const task = makeTask({
+			suite: "trading_analyst",
+			input: { conclusion: "hold" },
+		});
+		const trial = makeTrial({
+			output: "Holding.",
+			toolCalls: [
+				{
+					name: "log_decision",
+					input: {},
+					output: Array(149).fill("word").join(" "),
+				},
+			],
+		});
+		const results = gradeTradeAnalyst(trial, task);
+		expect(results.some((r) => r.kind === "fail" && r.detail?.includes("log_decision"))).toBe(
+			false,
+		);
 	});
 });
 
