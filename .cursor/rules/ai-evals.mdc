@@ -1,0 +1,108 @@
+---
+description: Guidance for designing, implementing, and maintaining AI evaluations — graders, harnesses, suites, and the eval-driven development flywheel
+alwaysApply: false
+globs: src/evals/**
+---
+
+# AI Evaluation Guidance
+
+Distilled from [Anthropic — Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) and [Vercel — Eval-driven development](https://vercel.com/blog/eval-driven-development-build-better-ai-faster).
+
+## Core concepts
+
+| Term | Definition |
+|---|---|
+| **Eval suite** | Collection of tasks measuring a specific capability or behaviour |
+| **Task** | Single test with defined inputs and success criteria |
+| **Trial** | One attempt at a task (run multiple — model output varies between runs) |
+| **Grader** | Logic that scores one aspect of agent performance; a task can have many |
+| **Transcript** | Full record of a trial: outputs, tool calls, reasoning, intermediate results |
+| **Outcome** | Final environment state, not what the agent *said* it did |
+
+## Grader types — choose the right one
+
+### Code-based graders (prefer where possible)
+- Fast, cheap, objective, reproducible
+- Use for: JSON shape validation, field constraints, word budgets, regex checks, tool-call verification, token/iteration counts
+- Weakness: brittle to valid variations; can't assess subjective quality
+
+### LLM-as-judge graders (where code can't reach)
+- Handles freeform output, open-ended tasks, nuance
+- Use for: reasoning quality, signal interpretation, action appropriateness, coherence
+- **Calibrate against human judgement** — run periodic spot-checks to verify LLM grades match expert opinion
+- Give the judge a structured rubric with clear dimensions; grade each dimension with an isolated call rather than one call for all dimensions
+- Give the judge an escape hatch ("Unknown" / "Insufficient information") to avoid hallucinated grades
+- LLM evals cost 1.5–2× more than code-based — use code graders first, LLM graders for what remains
+
+### Human graders (for calibration, not routine)
+- Gold standard but slow and expensive
+- Use to: calibrate LLM graders, validate subjective tasks, resolve inter-rater disagreement
+
+## Capability vs regression evals
+
+| Type | Purpose | Expected pass rate | Lifecycle |
+|---|---|---|---|
+| **Regression** | "Does it still work?" | ~100% | Run on every deploy; failures = something broke |
+| **Capability** | "How good is it?" | Starts low, hill-climb | Run on prompt/model changes; measures improvement |
+
+Capability evals that reach high pass rates **graduate** into the regression suite.
+
+## Task design
+
+1. **Start with 20–50 tasks** drawn from real failures — don't wait for hundreds
+2. **Source from production** — manual checks, bug reports, support queue, `agent_logs`
+3. **Make tasks unambiguous** — two domain experts should independently reach the same pass/fail verdict
+4. **Create reference solutions** — a known-good output that passes all graders (proves the task is solvable)
+5. **Balance positive and negative cases** — test both "should trigger" and "should NOT trigger" to avoid one-sided optimisation
+6. **Build partial credit** — an agent that gets 3/4 steps right is meaningfully better than one that fails immediately
+
+## Grader design
+
+- **Grade outcomes, not paths** — don't require a specific sequence of tool calls; agents find valid approaches you didn't anticipate
+- **Make graders cheat-resistant** — passing should require genuinely solving the problem
+- **0% pass@100 usually means a broken task**, not an incapable agent — double-check the spec and graders
+- **Read the transcripts** — you won't know if graders work until you read trials and verify grades match your judgement
+
+## Non-determinism
+
+Run multiple trials per task (≥3 for capability evals, 1 for regression).
+
+| Metric | Measures | Use when |
+|---|---|---|
+| **pass@k** | P(≥1 success in k trials) — rises with k | One success matters (coding, research) |
+| **pass^k** | P(all k trials succeed) — falls with k | Consistency matters (user-facing agents) |
+
+## The eval-driven flywheel (Vercel)
+
+```
+Evals → identify weakness → improve prompt/model → re-eval → confirm improvement
+  ↑                                                              ↓
+  ← ← ← ← ← ← ← production feedback ← ← ← ← ← ← ← ← ← ← ←
+```
+
+1. **Evals** give data-driven signal on strengths and weaknesses
+2. **Data** — evals pinpoint data gaps; high-quality data fuels fine-tuning
+3. **Models & strategies** — evals enable rapid A/B testing of models, prompts, RAG strategies
+4. **Feedback** — user feedback (error reports, implicit behaviour, explicit ratings) feeds back into eval tasks
+
+## Eval harness principles
+
+- Each trial starts from a **clean, isolated environment** — no shared state between runs
+- The eval agent should function **the same as production** — same tools, same prompts, same constraints
+- Log results with enough metadata to reconstruct the trial (inputs, transcript, grader scores, model version, prompt version)
+- Track **latency, token usage, cost per task, error rates** as baseline metrics on every run
+
+## Eval suite health
+
+- **Monitor for saturation** — a 100% suite tracks regressions but gives no improvement signal; add harder tasks
+- **Maintain continuously** — eval suites are living artifacts; update as the product and model evolve
+- **Practice eval-driven development** — define evals for planned capabilities *before* the agent can fulfil them, then iterate until it can
+
+## Anti-patterns
+
+- Writing evals only after launch (requirements drift, reverse-engineering success criteria)
+- Testing only happy paths (one-sided optimisation)
+- Grading tool-call sequences instead of outcomes (brittle, punishes creativity)
+- Taking eval scores at face value without reading transcripts
+- Using a single LLM call to grade all dimensions (use isolated calls per dimension)
+- Ignoring cost: LLM graders at 1.5–2× code graders adds up — prefer code where possible

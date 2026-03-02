@@ -1,0 +1,63 @@
+---
+description: Progress tracking, verification gates, and premature completion prevention for multi-step implementations (10+ todos)
+alwaysApply: true
+---
+
+# Long-Running Task Harness
+
+Patterns from [Anthropic's long-running agent harness research](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) to prevent context loss, premature completion, and undocumented state.
+
+## Bootstrap sequence
+
+Every new session or subagent working on an existing plan must start with:
+
+1. Read the plan file — understand scope and current todo statuses
+2. Read the progress file (if it exists) — see what was built and what interfaces exist
+3. Run `bun run typecheck` — verify the codebase is clean before writing code
+4. Identify the next incomplete todo — do NOT re-derive priorities from scratch
+
+## Progress file
+
+For plans with 10+ todos, maintain a progress file at `docs/progress/<plan-name>.md`.
+
+- **Created** after the first layer completes, listing contracts/types established
+- **Updated** after each todo completes: what was built, what it exports, any decisions made
+- **Read first** by every subsequent session or subagent to avoid re-exploring the codebase
+
+```
+## Completed
+- [types] EvalTask, GraderResult defined in src/evals/types.ts
+- [code-grader-quick-scan] gradeQuickScan() in src/evals/graders/code-graders.ts
+
+## Current layer: L3
+## Next todo: llm-grader-quick-scan
+
+## Decisions
+- Used Zod discriminated union for GraderResult (pass/fail/skip)
+- LLM grader prompts import from momentum-rubric.ts, not inline text
+```
+
+## Verification gate
+
+A todo is NOT complete until all of these pass:
+
+1. `bun run typecheck` passes
+2. `bun test` passes (if tests exist for this module)
+3. `bun run lint` passes
+4. The progress file is updated
+5. A git commit is made
+
+Do NOT mark a todo complete based on "it looks right." Run the checks.
+
+## Incremental commits
+
+Commit after each todo, not after each layer. Format: `<scope>: <todo-id> — <what was done>`. This provides recovery points if a later todo breaks something.
+
+## Premature completion prevention
+
+- Do NOT declare the plan "done" until every todo is marked complete
+- After the final todo, run the full verification suite one more time
+- If any todo was skipped or deferred, note why in the progress file and inform the user
+- Do NOT look around, see progress, and declare victory — check the todo list
+
+Plans under 10 todos don't need a progress file, but still require the verification gate.

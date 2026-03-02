@@ -1,0 +1,59 @@
+---
+description: Label plan todos with execution mode (SERIAL/PARALLEL) and dispatch subagents accordingly during implementation
+alwaysApply: true
+---
+
+# Task Parallelism Protocol
+
+When creating or executing plans with multiple todos, apply these principles from [Google Research's agent scaling study](https://research.google/blog/towards-a-science-of-scaling-agent-systems-when-and-why-agent-systems-work/).
+
+## When planning: label every todo
+
+Tag each todo with an execution mode prefix:
+
+- `SERIAL L<n>` — must run sequentially by the main agent
+- `PARALLEL L<n> Agent<X>` — can run as a subagent, grouped with others sharing the same agent letter
+
+### When to use SERIAL
+
+- Tasks that establish contracts others depend on (types, schemas, shared constants)
+- Tasks with high shared-context density (multiple tasks referencing the same rubric, prompt structure, or interface)
+- Tasks with cross-cutting concerns (reading from multiple shared tables, wiring multiple modules together)
+- Final integration points
+
+### When to use PARALLEL
+
+- Tasks that produce independent files with no cross-dependencies
+- Tasks that import only from frozen/completed modules
+- Tasks that query different data sources with no shared state
+
+### Deciding: the alignment test
+
+Ask: "If two agents did these tasks simultaneously without communicating, would the outputs be consistent?" If yes, PARALLEL. If no, SERIAL.
+
+Key findings to remember:
+- Parallelizable tasks see up to +81% improvement with multi-agent coordination
+- Sequential tasks degrade -39% to -70% when parallelised (the "sequential penalty")
+- Independent agents (no review) amplify errors 17.2x; centralized review contains it to 4.4x
+
+## When executing: follow the labels
+
+1. Complete all todos in layer N before starting layer N+1
+2. For SERIAL todos within a layer, execute them in listed order
+3. For PARALLEL todos, dispatch subagents grouped by their Agent letter (max 3-4 concurrent)
+4. After parallel subagents complete, review their output for type/interface consistency before proceeding
+5. If a parallel agent's output conflicts with another's, fix it before moving to the next layer
+
+## Layer template for plans
+
+```
+L1 Foundation    — SERIAL  (types, schemas, shared constants)
+L2 Core modules  — PARALLEL (independent implementations importing from L1)
+L3 Integration   — SERIAL  (tests, wiring, modules that reference multiple L2 outputs)
+L4 Composition   — SERIAL  (configs that wire L2+L3 together)
+L5 Data/IO       — PARALLEL (independent data queries, seeders, migrations)
+L6 Verification  — SERIAL  (cross-cutting checks, outcome analysis)
+L7 Wiring        — SERIAL  (job registration, final integration)
+```
+
+Not every plan needs all 7 layers. Scale to fit — a 3-todo plan needs no layer annotations.

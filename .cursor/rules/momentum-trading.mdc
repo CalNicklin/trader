@@ -1,0 +1,45 @@
+---
+alwaysApply: false
+---
+Momentum trading domain knowledge for grading
+
+These principles inform the LLM-as-judge rubrics and outcome verification across all suites. Sources: QuantInsti momentum strategies, Investopedia momentum definition, Bayes/City UK momentum survival research.
+
+Core momentum principles
+"Buy high, sell higher" — momentum trading is NOT value investing. The agent should not penalise a stock for being "expensive" if momentum is confirmed. Graders should not downgrade a BUY decision solely because the stock is near 52-week highs, provided trend alignment and volume confirm.
+
+
+
+Trend persistence is the edge — momentum works because trends persist before reversing. The Bayes UK research found positive momentum survives ~4 months on average across UK style portfolios, while negative momentum survives 2-3 months. Graders should expect the agent to hold winners longer than it cuts losers.
+
+
+
+Volume confirms momentum — price moves without volume confirmation are noise. The QuantInsti framework emphasises that increasing volume during advances confirms momentum, while decreasing volume suggests weakening. Our gate already requires volumeRatio >= 0.8; graders should flag when the agent ignores volume divergence.
+
+
+
+Multiple indicator confirmation — relying on a single indicator is fragile. Graders should reward the agent for triangulating across trend alignment + RSI + MACD + volume, and penalise decisions based on a single signal.
+
+
+
+Transaction cost awareness — momentum strategies are sensitive to friction. For LSE stocks, 0.5% stamp duty means the momentum move must be large enough to overcome this drag. The agent should prefer US stocks for shorter-duration momentum plays (lower friction). Graders should flag LSE BUY decisions where the expected move is < 2% (stamp duty eats half the profit).
+
+
+
+Momentum decay and exit timing — the Bayes research shows momentum decays predictably. The agent should not hold indefinitely hoping for more upside. When ADX is declining, RSI shows bearish divergence, or MACD histogram is shrinking, these are exit signals. Graders should penalise "diamond hands" behaviour when deceleration signals are clear.
+
+
+
+Reversal risk at extremes — RSI > 75 (overbought) and RSI < 30 (oversold) are inflection zones, not continuation zones. Entering a new position at RSI > 75 without a specific catalyst is chasing exhausted momentum. Graders should treat this as a significant error.
+
+
+
+Golden cross / death cross — SMA crossovers (fast MA crossing slow MA) are the foundational momentum signal. Our gate uses SMA20 > SMA50 as trend alignment. Graders should verify the agent respects this: buying into a death cross (SMA20 < SMA50) without extraordinary justification is wrong.
+
+
+
+Bollinger Band context — price near the upper Bollinger Band in a trending market is normal (riding the band), not a sell signal. Graders should not penalise holds when bollingerPercentB > 0.8 if trend alignment is strong. Conversely, price breaking below the lower band in a downtrend confirms momentum continuation downward.
+
+
+
+UK-specific: momentum survival asymmetry — the Bayes research found negative momentum in UK large caps survives only ~2 months vs ~4 months for positive. This means the agent should be quicker to exit losing positions than winning ones. Graders should penalise symmetric holding periods for winners and losers.
