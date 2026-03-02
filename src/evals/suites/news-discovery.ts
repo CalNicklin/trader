@@ -4,9 +4,13 @@ import { gradeNewsDiscovery } from "../graders/code-graders-news.ts";
 import type { EvalTask, EvalTrial, Suite } from "../types.ts";
 
 const EXTRACTION_PROMPT = `Extract stock tickers mentioned in these financial headlines. Only include companies clearly mentioned by name.
-For UK companies, return the LSE ticker (without .L suffix), exchange "LSE".
-For US companies, return the NASDAQ or NYSE ticker, exchange "NASDAQ" or "NYSE".
-Return a JSON array of objects with "symbol", "name", and "exchange". Return [] if none found.`;
+
+Exchange selection rules (CRITICAL — follow exactly):
+- Choose exchange based on the company's primary listing, NOT from the ticker symbol. UK-listed companies → LSE. US-listed companies → NASDAQ or NYSE.
+- Use ONLY "LSE", "NASDAQ", or "NYSE". No other values (AMEX, XETRA, LON, OTC, etc.) are valid.
+- If unsure of primary listing: UK companies → prefer LSE; US companies → prefer NYSE.
+
+Return a JSON array of objects with "symbol" (without .L suffix), "name", and "exchange". Return [] if none found.`;
 
 async function runNewsDiscoveryTrial(task: EvalTask): Promise<EvalTrial> {
 	const { getConfig } = await import("../../config.ts");

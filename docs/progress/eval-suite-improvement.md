@@ -12,5 +12,9 @@
   - Escalation rule in `quick-scan.ts`: when stocks PASS all gates, MUST escalate
   - Tests: 299 chars passes, 301 fails in `tests/eval-code-graders.test.ts`
 
-## Current layer: L2 done, L3 next
-## Next todo: news-prompt-exchange
+- **[news-prompt-exchange]** Hardened News Discovery prompt
+  - Exchange chosen from company listing (UK→LSE, US→NASDAQ/NYSE), not ticker
+  - Only LSE, NASDAQ, NYSE allowed; prefer NYSE for US when unsure
+
+## Current layer: L3 done, L4 next
+## Next todo: eval-verify
