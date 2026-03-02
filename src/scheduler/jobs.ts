@@ -27,7 +27,6 @@ const BROKER_JOBS: ReadonlySet<JobName> = new Set([
 	"mini_analysis",
 	"pre_market",
 	"post_market",
-	"daily_summary",
 ]);
 
 let jobRunning = false;
