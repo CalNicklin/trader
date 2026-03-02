@@ -16,5 +16,24 @@
   - Exchange chosen from company listing (UK→LSE, US→NASDAQ/NYSE), not ticker
   - Only LSE, NASDAQ, NYSE allowed; prefer NYSE for US when unsure
 
-## Current layer: L3 done, L4 next
-## Next todo: eval-verify
+## Current layer: L4
+## Next todo: none — all implementation complete
+
+### L4 eval-verify: Run full suite
+
+To verify improvement, run the AI eval suite after deploy:
+
+```bash
+# Option A: From project root (requires .env with ANTHROPIC_API_KEY, etc.)
+bun run evals
+
+# Option B: On server after deploy
+ssh deploy@46.225.127.44 'docker exec docker-trader-1 bun -e "const r = await fetch(\"http://localhost:3847/jobs/ai_evals\", {method:\"POST\"}); console.log(await r.json())"'
+```
+
+**Baseline (2026-03-02)**: Research 100%, Quick Scan 70%, Trading Analyst 0%, News Discovery 75%
+
+**Success criteria**:
+- Trading Analyst: >0% (ideally 50%+)
+- Quick Scan: >80%
+- News Discovery: 100%
