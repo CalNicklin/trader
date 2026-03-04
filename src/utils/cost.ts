@@ -11,6 +11,7 @@ const HAIKU_JOBS = new Set([
 	"pattern_analyzer",
 	"news_discovery",
 	"decision_scorer_extract",
+	"trading_analyst",
 ]);
 
 type Tier = keyof typeof PRICING;
