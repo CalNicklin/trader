@@ -45,6 +45,7 @@ services:
       GITHUB_REPO_NAME: ${GITHUB_REPO_NAME:-trader}
       DB_PATH: /app/data/trader.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      DAILY_API_BUDGET_USD: ${DAILY_API_BUDGET_USD:-0}
       NODE_ENV: production
       PAPER_TRADING: ${PAPER_TRADING:-true}
       FMP_API_KEY: ${FMP_API_KEY}
