@@ -42,6 +42,7 @@ export async function getEstimatedSessionCost(db?: DbClient): Promise<number> {
 
 export async function canAffordSonnet(db?: DbClient): Promise<boolean> {
 	const config = getConfig();
+	if (config.DAILY_API_BUDGET_USD <= 0) return true; // 0 or negative = no limit
 	const d = db ?? getDb();
 	const [spent, estimated] = await Promise.all([getDailySpend(d), getEstimatedSessionCost(d)]);
 	return spent + estimated < config.DAILY_API_BUDGET_USD;

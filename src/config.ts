@@ -43,7 +43,7 @@ const envSchema = z.object({
 	// Cost control
 	ESCALATION_COOLDOWN_MIN: z.coerce.number().default(20),
 	MATERIAL_CHANGE_PCT: z.coerce.number().default(2),
-	DAILY_API_BUDGET_USD: z.coerce.number().default(3.0),
+	DAILY_API_BUDGET_USD: z.coerce.number().default(0), // 0 = no limit; set e.g. 3 to cap daily spend
 	MAX_AGENT_ITERATIONS: z.coerce.number().default(8),
 });
 

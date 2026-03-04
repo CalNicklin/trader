@@ -9,6 +9,7 @@ import { canAffordSonnet, getDailySpend, getEstimatedSessionCost } from "../src/
 process.env.ANTHROPIC_API_KEY = "test-key";
 process.env.RESEND_API_KEY = "test-key";
 process.env.ALERT_EMAIL_TO = "test@test.com";
+process.env.DAILY_API_BUDGET_USD = "3"; // tests expect a finite budget
 
 function createTestDb(): DbClient {
 	const sqlite = new Database(":memory:");
