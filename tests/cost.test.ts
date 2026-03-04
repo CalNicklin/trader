@@ -9,7 +9,7 @@ describe("estimateCost", () => {
 	});
 
 	test("Sonnet job uses Sonnet rates ($3/$15 per MTok)", () => {
-		const cost = estimateCost("trading_analyst", 1_000_000, 1_000_000);
+		const cost = estimateCost("research", 1_000_000, 1_000_000);
 		// 1M input × $3/MTok + 1M output × $15/MTok = $18
 		expect(cost).toBeCloseTo(18, 2);
 	});
@@ -42,7 +42,7 @@ describe("estimateCost", () => {
 		// Sonnet: 1M non-cache input, 200k cache write, 300k cache read, 500k output
 		// cost = (1M × $3 + 500k × $15 + 200k × $3.75 + 300k × $0.30) / 1M
 		//      = (3.0 + 7.5 + 0.75 + 0.09) = 11.34
-		const cost = estimateCost("trading_analyst", 1_000_000, 500_000, 200_000, 300_000);
+		const cost = estimateCost("research", 1_000_000, 500_000, 200_000, 300_000);
 		expect(cost).toBeCloseTo(11.34, 2);
 	});
 
