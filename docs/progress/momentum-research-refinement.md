@@ -79,6 +79,16 @@
 ### Trading Analyst (17%, target not met)
 - 1/6 pass. 5 failures are "analysis paralysis" — agent hits max iterations gathering data without executing decisions. This is NOT a momentum problem — it's a tool-use efficiency / iteration budget issue unrelated to this plan's scope.
 
+#### Post-fix: Iteration bump (5→8) + safety-net final response
+- `MAX_AGENT_ITERATIONS` raised from 5 to 8 (commit `403c001`)
+- Added forced text-only final call when iterations exhaust (safety net, not a nudge)
+- Added 15s timeout to `getHistoricalBars` which had none and was hanging indefinitely (commit `9ebe31f`)
+- Partial eval run (3/6 tasks, IBKR down on Sunday night):
+  - ta-5904: 6 iterations, score 2.3 (failed — IBKR connectivity)
+  - ta-5690: **8 iterations, score 4.8 — PASSED** (full gather→research→size→trade→stop cycle)
+  - ta-5683: 8 iterations, score 5.0 (failed — just below threshold, all failures were IBKR timeouts)
+- Agent behavior dramatically improved: proper momentum reasoning, stop losses, intentions logged. Previous run returned "Max iterations reached" strings. Need to re-run during market hours for a fair comparison.
+
 ### News Discovery (100%, maintained)
 - 4/4 pass. No regression.
 
@@ -103,13 +113,18 @@
   - `src/research/pipeline.ts`: persists `indicatorSummary` in rawData so future eval tasks include pre-computed indicators
   - `src/evals/suites/research.ts`: extracts `indicatorSummary` from rawData and appends as `Technical Indicators:` line, matching production behavior
 
-## Current layer: L4 (eval run — blocked on deploy)
+## Eval Run (2026-03-02 post-deploy)
 
-All code changes complete. Eval run requires either:
-1. Deploy to server and trigger via `POST /jobs/ai_evals` with `suiteNames=["research"]`
-2. Pull DB snapshot locally (`bun run db:pull`) and run `bun -e "import {runAiEvals} from './src/evals/runner.ts'; await runAiEvals(['research'])"`
+**Research suite: 67% pass** (10/15, 5 regressions) — unchanged from baseline.
 
-Note: existing eval tasks in the DB won't have `indicatorSummary` in rawData (that field is only persisted for new research runs). The eval trial extracts it when available but falls back gracefully. Full benefit requires running the research pipeline first to populate new rawData, then re-running evals.
+Same 5 failures: res-135, res-136, res-138, res-139, res-141. The eval tasks are seeded from the 15 most recent research rows; those rows were created *before* our deployment (no `indicatorSummary` in rawData). The pipeline ran after deploy and added 10 new rows with enriched rawData, but the eval loaded the 15 most recent by `createdAt` — the mix may still include older rows without indicators.
+
+**Next steps to improve:**
+1. Re-run research pipeline to ensure more rows have `indicatorSummary`
+2. Consider re-seeding eval tasks to prefer rows with `indicatorSummary` when available
+3. The prompt hardening and momentum verdict are in place; they should help once tasks include the pre-computed indicators
+
+## Current layer: L4 complete
 
 ## Decisions
 

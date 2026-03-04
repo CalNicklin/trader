@@ -21,10 +21,13 @@ export async function runAiEvals(suiteNames?: readonly string[]): Promise<void> 
 	const { createChildLogger } = await import("../utils/logger.ts");
 	const log = createChildLogger({ module: "ai-evals" });
 
-	const { canAffordSonnet } = await import("../utils/budget.ts");
-	if (!(await canAffordSonnet())) {
-		log.warn("Skipping AI evals — daily budget insufficient for Sonnet calls");
-		return;
+	const skipBudget = process.env.EVAL_SKIP_BUDGET === "true";
+	if (!skipBudget) {
+		const { canAffordSonnet } = await import("../utils/budget.ts");
+		if (!(await canAffordSonnet())) {
+			log.warn("Skipping AI evals — daily budget insufficient for Sonnet calls");
+			return;
+		}
 	}
 
 	const suites = suiteNames

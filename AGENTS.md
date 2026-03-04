@@ -19,6 +19,10 @@ Automated trading agent for IBKR UK Stocks & Shares ISA.
 - `bun run lint:fix` - Auto-fix lint issues
 - `bun run db:generate` - Generate Drizzle migrations
 - `bun run db:migrate` - Run migrations
+- `bun run db:studio:live` - Browse live DB with Drizzle Studio (connects to server, opens https://local.drizzle.studio)
+- `bun run db:studio` - Pull DB snapshot and browse locally with Drizzle Studio
+- `bun run db:pull` - Pull DB snapshot only (downloads to `./data/trader.db`)
+- `bun run evals` - Run AI eval suites (requires `.env` with `ANTHROPIC_API_KEY`; copy `.env.example` if needed; `bun run db:pull` first for task seeding)
 - `bun test` - Run tests
 
 ## Deployment
@@ -28,7 +32,7 @@ Automated trading agent for IBKR UK Stocks & Shares ISA.
 - **Runtime**: Docker Compose (`docker/docker-compose.yml`) — two containers: `ib-gateway` (gnzsnz/ib-gateway) + `trader`
 - **DB in container**: `/app/data/trader.db` (persisted via `docker_trader-data` volume)
 - **IB Gateway**: cold restart at 05:00 UTC, VNC on port 5900, healthcheck on port 4004
-- **Logs**: `ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml logs trader --tail 50"`
+- **Logs**: `ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml logs trader --tail 50"` (add `-f` to follow live)
 - **Container status**: `ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml ps"`
 - **Restart**: `ssh deploy@46.225.127.44 "docker compose -f ~/trader/docker/docker-compose.yml restart trader"`
 
@@ -44,7 +48,7 @@ Run any scheduled job on demand (uses the running trader process and its IBKR co
 ```bash
 ssh deploy@46.225.127.44 'docker exec docker-trader-1 bun -e "const r = await fetch(\"http://localhost:3847/jobs/<JOB_NAME>\", {method:\"POST\"}); console.log(await r.json())"'
 ```
-Valid jobs: `orchestrator_tick`, `mini_analysis`, `pre_market`, `post_market`, `daily_summary`, `weekly_summary`, `research_pipeline`, `self_improvement`, `trade_review`, `mid_week_analysis`, `end_of_week_analysis`
+Valid jobs: `orchestrator_tick`, `mini_analysis`, `pre_market`, `post_market`, `daily_summary`, `weekly_summary`, `research_pipeline`, `self_improvement`, `trade_review`, `mid_week_analysis`, `end_of_week_analysis`, `ai_evals`
 
 - See `docs/monitoring.md` for full SSH cheat sheet and useful queries
 
