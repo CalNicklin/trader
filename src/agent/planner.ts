@@ -71,7 +71,7 @@ export async function runQuickScan(context: string): Promise<QuickScanResult> {
 	}
 }
 
-/** Run the trading analyst agent with tool use (uses Haiku for cost visibility) */
+/** Run the trading analyst agent with tool use (Sonnet) */
 export async function runTradingAnalyst(
 	userMessage: string,
 	maxIterations?: number,
@@ -83,7 +83,7 @@ export async function runTradingAnalyst(
 		userMessage,
 		toolDefinitions,
 		iterations,
-		config.CLAUDE_MODEL_FAST,
+		config.CLAUDE_MODEL,
 	);
 }
 
