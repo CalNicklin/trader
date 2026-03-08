@@ -36,9 +36,9 @@ export function startScheduler(): void {
 		}),
 	);
 
-	// Research pipeline at 18:00 weekdays
+	// Research pipeline at 18:01 weekdays (avoid collision with orchestrator_tick at 18:00)
 	tasks.push(
-		cron.schedule("0 18 * * 1-5", () => runJobs("research_pipeline"), {
+		cron.schedule("1 18 * * 1-5", () => runJobs("research_pipeline"), {
 			timezone: "Europe/London",
 		}),
 	);
