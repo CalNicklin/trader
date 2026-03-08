@@ -29,9 +29,9 @@ export function startScheduler(): void {
 		}),
 	);
 
-	// Daily summary email at 17:00
+	// Daily summary email at 17:01 (avoid collision with orchestrator_tick at 17:00)
 	tasks.push(
-		cron.schedule("0 17 * * 1-5", () => runJobs("daily_summary"), {
+		cron.schedule("1 17 * * 1-5", () => runJobs("daily_summary"), {
 			timezone: "Europe/London",
 		}),
 	);
