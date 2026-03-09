@@ -29,9 +29,9 @@ export function startScheduler(): void {
 		}),
 	);
 
-	// Daily summary email at 17:01 (avoid collision with orchestrator_tick at 17:00)
+	// Daily summary email at 17:05 (after 17:00 tick completes; ticks can run 30–60s)
 	tasks.push(
-		cron.schedule("1 17 * * 1-5", () => runJobs("daily_summary"), {
+		cron.schedule("5 17 * * 1-5", () => runJobs("daily_summary"), {
 			timezone: "Europe/London",
 		}),
 	);
