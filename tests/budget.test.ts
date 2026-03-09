@@ -1,15 +1,19 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { resetConfigForTesting } from "../src/config.ts";
 import type { DbClient } from "../src/db/client.ts";
 import * as schema from "../src/db/schema.ts";
 import { canAffordSonnet, getDailySpend, getEstimatedSessionCost } from "../src/utils/budget.ts";
 
-process.env.ANTHROPIC_API_KEY = "test-key";
-process.env.RESEND_API_KEY = "test-key";
-process.env.ALERT_EMAIL_TO = "test@test.com";
-process.env.DAILY_API_BUDGET_USD = "3"; // tests expect a finite budget
+beforeEach(() => {
+	process.env.ANTHROPIC_API_KEY = "test-key";
+	process.env.RESEND_API_KEY = "test-key";
+	process.env.ALERT_EMAIL_TO = "test@test.com";
+	process.env.DAILY_API_BUDGET_USD = "3";
+	resetConfigForTesting();
+});
 
 function createTestDb(): DbClient {
 	const sqlite = new Database(":memory:");

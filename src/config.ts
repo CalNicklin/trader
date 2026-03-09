@@ -51,6 +51,11 @@ export type Config = z.infer<typeof envSchema>;
 
 let _config: Config | null = null;
 
+/** Reset cached config (for tests that need to re-parse with different env) */
+export function resetConfigForTesting(): void {
+	_config = null;
+}
+
 export function getConfig(): Config {
 	if (!_config) {
 		const result = envSchema.safeParse(process.env);
